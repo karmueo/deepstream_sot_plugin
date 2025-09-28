@@ -1,0 +1,22 @@
+%YAML:1.0
+
+BaseConfig:
+  modelName: 2    # { 0=sutrack, 1=ostrack, 2=mixformer_v2 }
+  modelFilePath: /workspace/deepstream-app-custom/src/sot_plugin/models/mixformerv2_online_base_fp16.engine
+  enableTrackCenterStable: 1 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
+  trackCenterStablePixelThreshold: 3 # 稳定判断像素标准差阈值(越小越严格)
+
+TargetManagement:
+  expandFactor: 1.0
+  probationAge: 2
+  maxMiss: 10 # max number of frames to miss before target is removed
+  scoreThreshold: 0.3 # 跟踪置信度阈值
+  iouThreshold: 0.5 # 跟踪框和检测框匹配的IOU阈值
+  trackBoxWidthThreshold: 0.3 # 跟踪框最大宽度因子
+  trackBoxHeightThreshold: 0.3 # 跟踪框最大高度因子
+  maxTrackAge: 30 # 跟踪历史长度
+
+MixformerV2Config:
+  update_interval: 100 # online template 更新帧间隔
+  max_score_decay: 0.95 # 最大分数衰减因子
+  template_update_score_threshold: 0.5 # 在线模板更新置信度阈值
