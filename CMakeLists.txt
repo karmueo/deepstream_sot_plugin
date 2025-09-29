@@ -17,7 +17,7 @@ include_directories(${GLIB2_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${DS_INCLUDES_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/includes)
-include_directories(/usr/local/cuda-12.6/targets/x86_64-linux/include/)
+include_directories(/usr/local/cuda/targets/x86_64-linux/include/)
 
 file(GLOB TRACK CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cpp)
 
