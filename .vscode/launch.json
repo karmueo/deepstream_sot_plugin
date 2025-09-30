@@ -8,13 +8,13 @@
             "name": "(gdb) 启动",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/workspace/deepstream-app-custom/build/deepstream-app",
+            "program": "${workspaceRoot}/../build/deepstream-app",
             "args": [
                 "-c",
-                "/workspace/deepstream-app-custom/src/deepstream-app/configs/rgb_app_config.txt"
+                "${workspaceRoot}/../src/deepstream-app/configs/rgb_app_config.txt"
             ],
             "stopAtEntry": false,
-            "cwd": "/workspace/deepstream-app-custom",
+            "cwd": "${workspaceRoot}/..",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
@@ -30,23 +30,6 @@
                     "ignoreFailures": true
                 }
             ]
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Launch",
-            "program": "/workspace/deepstream-app-custom/src/deepstream-app/deepstream-app",
-            "args": [
-                "-c",
-                "/workspace/deepstream-app-custom/src/deepstream-app/configs/ir_app_config.txt"],
-            "cwd": "/workspace/deepstream-app-custom"
-        },
-        {
-            "type": "lldb",
-            "request": "attach",
-            "name": "Attach",
-            // "program": "/workspace/deepstream-app-custom/src/deepstream-app/deepstream-app",
-            "pid": "${command:pickProcess}",
         },
         {
             "name": "Python 调试程序: 当前文件",

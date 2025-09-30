@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <fstream>
 #include <limits>
+#include <utility>
 
 static bool isValidTrackedObjList(const NvMOTTrackedObjList *trackedObjList)
 {
@@ -20,6 +21,37 @@ static bool isValidTrackedObjList(const NvMOTTrackedObjList *trackedObjList)
 
     // 所有检查通过，对象有效
     return true;
+}
+
+static NvMOTObjToTrack *extractMatchedDetection(NvMOTFrame                *frame,
+                                                uint32_t                   matchedDetectId)
+{
+    if (frame == nullptr)
+    {
+        return nullptr;
+    }
+
+    NvMOTObjToTrackList &objectsIn = frame->objectsIn;
+
+    if (objectsIn.list == nullptr || objectsIn.numFilled == 0)
+    {
+        return nullptr;
+    }
+
+    if (matchedDetectId != std::numeric_limits<uint32_t>::max() &&
+        matchedDetectId < objectsIn.numFilled)
+    {
+        if (matchedDetectId != 0)
+        {
+            std::swap(objectsIn.list[0], objectsIn.list[matchedDetectId]);
+        }
+
+        objectsIn.numFilled = 1;
+        return &objectsIn.list[0];
+    }
+
+    objectsIn.numFilled = 0;
+    return nullptr;
 }
 
 NvMOTContext::NvMOTContext(const NvMOTConfig   &configIn,
@@ -83,7 +115,7 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         if (trackedObjList->numAllocated != 1)
         {
             // Reallocate memory space
-            delete trackedObjList->list;
+            delete[] trackedObjList->list;
             trackedObjList->list = new NvMOTTrackedObj[1];
         }
 
@@ -95,6 +127,9 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         uint32_t  matchedDetectId = std::numeric_limits<uint32_t>::max();
         trackInfo = tracker_->update(bgraFrame, &frame->objectsIn,
                                      frame->frameNum, &matchedDetectId);
+
+        NvMOTObjToTrack *associatedObjectIn =
+            extractMatchedDetection(frame, matchedDetectId);
 
         NvMOTTrackedObj *trackedObjs = trackedObjList->list;
         // 单目标跟踪，所以只要第一个目标
@@ -137,17 +172,7 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
             trackedObj->bbox = motRect;
             trackedObj->confidence = trackInfo.bbox.score;
             trackedObj->age = trackInfo.age;
-            if (matchedDetectId != std::numeric_limits<uint32_t>::max() &&
-                frame->objectsIn.list != nullptr &&
-                matchedDetectId < frame->objectsIn.numFilled)
-            {
-                trackedObj->associatedObjectIn =
-                    &frame->objectsIn.list[matchedDetectId];
-            }
-            else
-            {
-                trackedObj->associatedObjectIn = nullptr;
-            }
+            trackedObj->associatedObjectIn = associatedObjectIn;
             // trackedObj->associatedObjectIn = objectToTrack_;
             // trackedObj->associatedObjectIn->doTracking = true;
 
@@ -169,6 +194,10 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
             if (trackedObj != nullptr)
             {
                 trackedObj->associatedObjectIn = nullptr;
+            }
+            if (frame->objectsIn.list != nullptr)
+            {
+                frame->objectsIn.numFilled = 0;
             }
         }
     }
