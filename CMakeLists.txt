@@ -35,3 +35,27 @@ install(TARGETS ${PROJECT_NAME}
         LIBRARY DESTINATION ${GST_PLUGINS_DIR}
         COMPONENT runtime
 )
+
+install(CODE [[
+        set(SRC_CONFIG "${CMAKE_SOURCE_DIR}/config_sot.yml")
+        if(NOT EXISTS "${SRC_CONFIG}")
+                message(FATAL_ERROR "Missing config file: ${SRC_CONFIG}")
+        endif()
+        set(SRC_MODELS "${CMAKE_SOURCE_DIR}/models")
+        if(NOT IS_DIRECTORY "${SRC_MODELS}")
+                message(FATAL_ERROR "Missing models directory: ${SRC_MODELS}")
+        endif()
+        set(DEST_DIR "/opt/nvidia/deepstream/deepstream/sot_plugin")
+        set(DEST_CONFIG "${DEST_DIR}/config/config_sot.yml")
+        set(DEST_MODELS_DIR "${DEST_DIR}/models")
+        file(MAKE_DIRECTORY "${DEST_DIR}/config")
+        if(EXISTS "${DEST_CONFIG}")
+                if(IS_SYMLINK "${DEST_CONFIG}")
+                        file(REMOVE "${DEST_CONFIG}")
+                else()
+                        message(FATAL_ERROR "Existing file at ${DEST_CONFIG} is not a symlink; please remove it manually.")
+                endif()
+        endif()
+        file(CREATE_LINK "${SRC_CONFIG}" "${DEST_CONFIG}" SYMBOLIC)
+        file(CREATE_LINK "${SRC_MODELS}" "${DEST_MODELS_DIR}" SYMBOLIC)
+]])

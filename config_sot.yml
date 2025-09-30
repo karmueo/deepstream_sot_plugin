@@ -2,7 +2,7 @@
 
 BaseConfig:
   modelName: 2    # { 0=sutrack, 1=ostrack, 2=mixformer_v2 }
-  modelFilePath: /workspace/deepstream-app-custom/src/sot_plugin/models/mixformerv2_online_base_fp16.engine
+  modelFilePath: /opt/nvidia/deepstream/deepstream/sot_plugin/models/mixformerv2_online_base_fp16.engine
   enableTrackCenterStable: 1 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
   trackCenterStablePixelThreshold: 3 # 稳定判断像素标准差阈值(越小越严格)
 
