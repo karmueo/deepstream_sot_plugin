@@ -98,10 +98,10 @@ mkdir -p build && cd build
 cmake ..
 
 # 3. 编译
-make -j$(nproc)
+sudo cmake --build .
 
 # 4. (可选) 安装到 DeepStream 插件目录 (CMake 中已设定 GST_PLUGINS_DIR)
-sudo make install
+sudo cmake --install .
 
 # 结果：生成 libsot.so (同时复制到 /opt/nvidia/deepstream/deepstream/lib)
 ```
