@@ -1,0 +1,23 @@
+%YAML:1.0
+# 通用配置
+image_path: tests/test_image.jpg
+init_bbox: [939, 525, 978, 556]
+loop_count: 10
+max_abs_error: 3.0
+
+# NanoTrack 配置
+# nanotrack_mode: merge 或 split
+nanotrack_mode: split
+nanotrack_merge_engine: models/nanotrack_merge_fp16.engine
+nanotrack_head_engine: models/nanotrack_head_fp16.engine
+nanotrack_backbone_engine: models/nanotrack_backbone_fp16.engine
+nanotrack_search_backbone_engine: models/nanotrack_backbone_search_fp16.engine
+# nanotrack_exemplar_size: 127  # 可选，不设置则使用默认值
+# nanotrack_instance_size: 255  # 可选，不设置则使用默认值
+
+# MixformerV2 配置
+mixformerv2_engine: models/mixformerv2_online_base_fp16.engine
+# mixformerv2_template_size: 112  # 可选，不设置则使用默认值
+# mixformerv2_search_size: 224    # 可选，不设置则使用默认值
+# mixformerv2_template_factor: 2.0  # 可选，不设置则使用默认值
+# mixformerv2_search_factor: 4.0    # 可选，不设置则使用默认值

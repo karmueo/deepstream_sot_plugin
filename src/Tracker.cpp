@@ -1,4 +1,6 @@
 #include "Tracker.h"
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 
 // 解析配置文件
@@ -28,6 +30,7 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
     // 先初始化新增字段默认值
     trackerConfig.enableTrackCenterStable = true;
     trackerConfig.trackCenterStablePixelThreshold = 3;
+    trackerConfig.nanotrack.mode = NANOTRACK_MODE_SPLIT;
 
     for (YAML::const_iterator itr = configyml["BaseConfig"].begin();
          itr != configyml["BaseConfig"].end(); ++itr)
@@ -36,7 +39,7 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
         if (key == "modelName")
         {
             trackerConfig.modelName = static_cast<MODEL_NAME>(itr->second.as<int>());
-            if (trackerConfig.modelName < MODEL_SUTRACK || trackerConfig.modelName > MODEL_MIXFORMERV2)
+            if (trackerConfig.modelName < MODEL_SUTRACK || trackerConfig.modelName > MODEL_NANOTRACK)
             {
                 std::cerr << "Invalid modelName in config file, set to default MixFormerV2" << std::endl;
                 trackerConfig.modelName = MODEL_MIXFORMERV2; // 默认设置为 MixFormerV2
@@ -233,6 +236,128 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
                     trackerConfig.mixformerV2.searchFactor = searchFactor;
                 }
             }
+        }
+    }
+
+    YAML::Node nanotrackNode;
+    if (configyml["NanotrackConfig"])
+    {
+        nanotrackNode = configyml["NanotrackConfig"];
+    }
+    else if (configyml["Nanotrack"])
+    {
+        nanotrackNode = configyml["Nanotrack"];
+    }
+
+    if (nanotrackNode)
+    {
+        std::string mode;
+        if (nanotrackNode["nanotrack_mode"])
+        {
+            mode = nanotrackNode["nanotrack_mode"].as<std::string>();
+        }
+        else if (nanotrackNode["mode"])
+        {
+            mode = nanotrackNode["mode"].as<std::string>();
+        }
+
+        if (!mode.empty())
+        {
+            std::string mode_lower;
+            mode_lower.resize(mode.size());
+            std::transform(mode.begin(), mode.end(), mode_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+
+            if (mode_lower == "merge")
+            {
+                trackerConfig.nanotrack.mode = NANOTRACK_MODE_MERGE;
+            }
+            else if (mode_lower == "split")
+            {
+                trackerConfig.nanotrack.mode = NANOTRACK_MODE_SPLIT;
+            }
+            else
+            {
+                std::cerr << "Invalid nanotrack_mode in config file, set to default split" << std::endl;
+                trackerConfig.nanotrack.mode = NANOTRACK_MODE_SPLIT;
+            }
+        }
+
+        if (nanotrackNode["nanotrack_merge_engine"])
+        {
+            trackerConfig.nanotrack.mergeEngine =
+                nanotrackNode["nanotrack_merge_engine"].as<std::string>();
+        }
+        else if (nanotrackNode["merge_engine"])
+        {
+            trackerConfig.nanotrack.mergeEngine =
+                nanotrackNode["merge_engine"].as<std::string>();
+        }
+
+        if (nanotrackNode["nanotrack_head_engine"])
+        {
+            trackerConfig.nanotrack.headEngine =
+                nanotrackNode["nanotrack_head_engine"].as<std::string>();
+        }
+        else if (nanotrackNode["head_engine"])
+        {
+            trackerConfig.nanotrack.headEngine =
+                nanotrackNode["head_engine"].as<std::string>();
+        }
+
+        if (nanotrackNode["nanotrack_backbone_engine"])
+        {
+            trackerConfig.nanotrack.backboneEngine =
+                nanotrackNode["nanotrack_backbone_engine"].as<std::string>();
+        }
+        else if (nanotrackNode["backbone_engine"])
+        {
+            trackerConfig.nanotrack.backboneEngine =
+                nanotrackNode["backbone_engine"].as<std::string>();
+        }
+
+        if (nanotrackNode["nanotrack_search_backbone_engine"])
+        {
+            trackerConfig.nanotrack.searchBackboneEngine =
+                nanotrackNode["nanotrack_search_backbone_engine"].as<std::string>();
+        }
+        else if (nanotrackNode["search_backbone_engine"])
+        {
+            trackerConfig.nanotrack.searchBackboneEngine =
+                nanotrackNode["search_backbone_engine"].as<std::string>();
+        }
+
+        if (nanotrackNode["nanotrack_exemplar_size"])
+        {
+            trackerConfig.nanotrack.exemplarSize =
+                nanotrackNode["nanotrack_exemplar_size"].as<int>();
+        }
+        else if (nanotrackNode["exemplar_size"])
+        {
+            trackerConfig.nanotrack.exemplarSize =
+                nanotrackNode["exemplar_size"].as<int>();
+        }
+
+        if (nanotrackNode["nanotrack_instance_size"])
+        {
+            trackerConfig.nanotrack.instanceSize =
+                nanotrackNode["nanotrack_instance_size"].as<int>();
+        }
+        else if (nanotrackNode["instance_size"])
+        {
+            trackerConfig.nanotrack.instanceSize =
+                nanotrackNode["instance_size"].as<int>();
+        }
+
+        if (trackerConfig.nanotrack.exemplarSize < 0)
+        {
+            std::cerr << "Invalid nanotrack_exemplar_size in config file, set to default" << std::endl;
+            trackerConfig.nanotrack.exemplarSize = 0;
+        }
+        if (trackerConfig.nanotrack.instanceSize < 0)
+        {
+            std::cerr << "Invalid nanotrack_instance_size in config file, set to default" << std::endl;
+            trackerConfig.nanotrack.instanceSize = 0;
         }
     }
 

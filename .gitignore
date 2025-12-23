@@ -44,3 +44,10 @@ build
 *.engine
 *.onnx
 .cache
+
+tmp
+AGENTS.md
+CLAUDE.md
+.claude/
+tests/output_videos
+*.mp4
