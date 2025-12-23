@@ -1,7 +1,7 @@
 %YAML:1.0
 
 BaseConfig:
-  modelName: 2    # { 0=sutrack, 1=ostrack, 2=mixformer_v2 }
+  modelName: 3    # { 0=sutrack, 1=ostrack, 2=mixformer_v2, 3=nanotrack }
   modelFilePath: /opt/nvidia/deepstream/deepstream/sot_plugin/models/mixformerv2_online_base_fp16.engine
   enableTrackCenterStable: 1 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
   trackCenterStablePixelThreshold: 3 # 稳定判断像素标准差阈值(越小越严格)
@@ -10,7 +10,7 @@ TargetManagement:
   expandFactor: 1.0
   probationAge: 2
   maxMiss: 10 # max number of frames to miss before target is removed
-  scoreThreshold: 0.3 # 跟踪置信度阈值
+  scoreThreshold: 0.75 # 跟踪置信度阈值
   iouThreshold: 0.5 # 跟踪框和检测框匹配的IOU阈值
   trackBoxWidthThreshold: 0.3 # 跟踪框最大宽度因子
   trackBoxHeightThreshold: 0.3 # 跟踪框最大高度因子
@@ -20,3 +20,13 @@ MixformerV2Config:
   update_interval: 100 # online template 更新帧间隔
   max_score_decay: 0.95 # 最大分数衰减因子
   template_update_score_threshold: 0.5 # 在线模板更新置信度阈值
+
+NanotrackConfig:
+  # nanotrack_mode: merge 或 split
+  nanotrack_mode: split
+  nanotrack_merge_engine: /opt/nvidia/deepstream/deepstream/sot_plugin/models/nanotrack_merge_fp16.engine
+  nanotrack_head_engine: /opt/nvidia/deepstream/deepstream/sot_plugin/models/nanotrack_head_fp16.engine
+  nanotrack_backbone_engine: /opt/nvidia/deepstream/deepstream/sot_plugin/models/nanotrack_backbone_fp16.engine
+  nanotrack_search_backbone_engine: /opt/nvidia/deepstream/deepstream/sot_plugin/models/nanotrack_backbone_search_fp16.engine
+  # nanotrack_exemplar_size: 127  # 可选，不设置则使用默认值
+  # nanotrack_instance_size: 255  # 可选，不设置则使用默认值

@@ -48,6 +48,45 @@ DeepTracker::DeepTracker(const std::string    &engine_name,
             trackerConfig_.mixformerV2.searchFactor);
         trackerPtr_ = std::move(mixformerPtr);
     }
+    else if (trackerConfig_.modelName == MODEL_NANOTRACK)
+    {
+        std::unique_ptr<NanotrackTRT> nanotrackPtr;
+        if (trackerConfig_.nanotrack.mode == NANOTRACK_MODE_MERGE)
+        {
+            std::string merge_engine = trackerConfig_.nanotrack.mergeEngine;
+            if (merge_engine.empty())
+            {
+                merge_engine = engine_name;
+            }
+            if (merge_engine.empty())
+            {
+                std::cerr << "Nanotrack merge engine path is empty." << std::endl;
+            }
+            nanotrackPtr = std::make_unique<NanotrackTRT>(merge_engine);
+        }
+        else
+        {
+            if (trackerConfig_.nanotrack.headEngine.empty() ||
+                trackerConfig_.nanotrack.backboneEngine.empty())
+            {
+                std::cerr << "Nanotrack head/backbone engine path is empty." << std::endl;
+            }
+            nanotrackPtr = std::make_unique<NanotrackTRT>(
+                trackerConfig_.nanotrack.headEngine,
+                trackerConfig_.nanotrack.backboneEngine,
+                trackerConfig_.nanotrack.searchBackboneEngine);
+        }
+
+        if (trackerConfig_.nanotrack.exemplarSize > 0)
+        {
+            nanotrackPtr->setExemplarSize(trackerConfig_.nanotrack.exemplarSize);
+        }
+        if (trackerConfig_.nanotrack.instanceSize > 0)
+        {
+            nanotrackPtr->setInstanceSize(trackerConfig_.nanotrack.instanceSize);
+        }
+        trackerPtr_ = std::move(nanotrackPtr);
+    }
     else
     {
         std::cerr << "Unsupported model name: " << trackerConfig_.modelName

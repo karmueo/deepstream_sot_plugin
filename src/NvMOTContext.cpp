@@ -120,12 +120,15 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         }
 
         NvBufSurfaceParams *bufferParams = frame->bufferList[0];
-        cv::Mat bgraFrame(bufferParams->height, bufferParams->width, CV_8UC4,
+        cv::Mat rgbaFrame(bufferParams->height, bufferParams->width, CV_8UC4,
                           bufferParams->dataPtr);
+        cv::Mat bgrFrame;
+        // 跟踪器输入为 3 通道 BGR，DeepStream 输出为 RGBA，需要转换
+        cv::cvtColor(rgbaFrame, bgrFrame, cv::COLOR_RGBA2BGR);
 
         TrackInfo trackInfo;
         uint32_t  matchedDetectId = std::numeric_limits<uint32_t>::max();
-        trackInfo = tracker_->update(bgraFrame, &frame->objectsIn,
+        trackInfo = tracker_->update(bgrFrame, &frame->objectsIn,
                                      frame->frameNum, &matchedDetectId);
 
         NvMOTObjToTrack *associatedObjectIn =

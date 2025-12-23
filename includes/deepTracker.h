@@ -1,9 +1,10 @@
 #pragma once
 
 #include "mixformerv2_trt.h"
+#include "nanotrack_trt.h"
 #include "nvdstracker.h"
-#include "suTrack_trt.h"
 #include "ostrack_trt.h"
+#include "suTrack_trt.h"
 
 
 struct TrackInfo
@@ -17,8 +18,9 @@ struct TrackInfo
 enum MODEL_NAME
 {
     MODEL_SUTRACK = 0,   // SUTRACK model
-    MODEL_OSTRACK,       // OSTRACK model
-    MODEL_MIXFORMERV2
+    MODEL_OSTRACK = 1,   // OSTRACK model
+    MODEL_MIXFORMERV2 = 2,
+    MODEL_NANOTRACK = 3  // NANOTRACK model
 };
 
 struct TARGET_MANAGEMENT
@@ -44,6 +46,23 @@ struct MIXFORMERV2_CONFIG
     float searchFactor = 4.0f;                 // 搜索区域缩放系数
 };
 
+enum NANOTRACK_MODE
+{
+    NANOTRACK_MODE_SPLIT = 0,  // 分段模型
+    NANOTRACK_MODE_MERGE        // 合并模型
+};
+
+struct NANOTRACK_CONFIG
+{
+    NANOTRACK_MODE mode = NANOTRACK_MODE_SPLIT; // 运行模式（默认分段）
+    std::string    mergeEngine;                // 合并模型引擎路径
+    std::string    headEngine;                 // head 引擎路径
+    std::string    backboneEngine;             // backbone 引擎路径
+    std::string    searchBackboneEngine;       // search backbone 引擎路径
+    int            exemplarSize = 0;           // 模板尺寸（<=0 表示使用默认值）
+    int            instanceSize = 0;           // 搜索尺寸（<=0 表示使用默认值）
+};
+
 struct TRACKER_CONFIG
 {
     std::string       modelFilePath;                                   // 模型文件路径（可选，自定义）
@@ -55,6 +74,7 @@ struct TRACKER_CONFIG
     // 跟踪中心位置稳定像素方差阈值（越小越严格），只有 enableTrackCenterStable 为 true 时才生效
     uint32_t          trackCenterStablePixelThreshold;               // 默认3像素（在解析或使用前初始化）
     MIXFORMERV2_CONFIG mixformerV2;                                  // MixFormerV2 特定配置
+    NANOTRACK_CONFIG  nanotrack;                                     // Nanotrack 特定配置
 };
 
 class DeepTracker
