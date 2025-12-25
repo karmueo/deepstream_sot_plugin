@@ -380,7 +380,11 @@ NvMOTStatus NvMOT_Query(uint16_t customConfigFilePathSize,
     /**  所有自定义跟踪器的必需配置。 */
     pQuery->computeConfig = NVMOTCOMP_CPU; // among {NVMOTCOMP_GPU, NVMOTCOMP_CPU}
     pQuery->numTransforms = 1;             // 0 for IOU and NvSORT tracker, 1 for NvDCF or NvDeepSORT tracker as they require the video frames
+#ifdef __aarch64__
+    pQuery->memType = NVBUF_MEM_SURFACE_ARRAY;
+#else
     pQuery->memType = NVBUF_MEM_CUDA_UNIFIED;
+#endif
     pQuery->batchMode = NvMOTBatchMode_Batch;          // batchMode must be set as NvMOTBatchMode_Batch
     pQuery->colorFormats[0] = NVBUF_COLOR_FORMAT_RGBA; // among {NVBUF_COLOR_FORMAT_NV12, NVBUF_COLOR_FORMAT_RGBA}
     pQuery->supportPastFrame = true;
