@@ -120,8 +120,17 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         }
 
         NvBufSurfaceParams *bufferParams = frame->bufferList[0];
+        // NVBUF_MEM_SURFACE_ARRAY 时 dataPtr 不可直接使用，优先用 mappedAddr
+        void *rgbaPtr = bufferParams->mappedAddr.addr[0] != nullptr
+                            ? bufferParams->mappedAddr.addr[0]
+                            : bufferParams->dataPtr;
+        if (rgbaPtr == nullptr)
+        {
+            std::cerr << "Invalid RGBA buffer pointer (dataPtr/mappedAddr is null)" << std::endl;
+            continue;
+        }
         cv::Mat rgbaFrame(bufferParams->height, bufferParams->width, CV_8UC4,
-                          bufferParams->dataPtr);
+                          rgbaPtr, bufferParams->pitch);
         cv::Mat bgrFrame;
         // 跟踪器输入为 3 通道 BGR，DeepStream 输出为 RGBA，需要转换
         cv::cvtColor(rgbaFrame, bgrFrame, cv::COLOR_RGBA2BGR);
