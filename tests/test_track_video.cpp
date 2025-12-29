@@ -6,6 +6,8 @@
 #include <chrono>
 #include <iomanip>
 #include <cstdio>
+#include <algorithm>
+#include <cctype>
 #include <sys/stat.h>
 #include <fstream>
 #include <sstream>
@@ -66,6 +68,12 @@ public:
     void setSearchSize(int size) { tracker.setSearchSize(size); }
     void setTemplateFactor(float f) { tracker.setTemplateFactor(f); }
     void setSearchFactor(float f) { tracker.setSearchFactor(f); }
+    void setUpdateInterval(int interval) { tracker.setUpdateInterval(interval); }
+    void setMaxScoreDecay(float decay) { tracker.setMaxScoreDecay(decay); }
+    void setTemplateUpdateScoreThreshold(float threshold)
+    {
+        tracker.setTemplateUpdateScoreThreshold(threshold);
+    }
 };
 
 struct TrackingResult {
@@ -126,6 +134,8 @@ int main(int argc, char* argv[]) {
     std::string nanotrack_backbone_engine;
     std::string nanotrack_search_backbone_engine;
     std::string mixformerv2_engine;
+    std::string mixformerv2_engine_small;
+    std::string mixformerv2_engine_base;
     std::string output_dir;
     bool show_preview = false;
     float confidence_threshold = 0.3f;
@@ -140,6 +150,12 @@ int main(int argc, char* argv[]) {
     fs["nanotrack_search_backbone_engine"] >> nanotrack_search_backbone_engine;
     if (!fs["mixformerv2_engine"].empty()) {
         fs["mixformerv2_engine"] >> mixformerv2_engine;
+    }
+    if (!fs["mixformerv2_engine_small"].empty()) {
+        fs["mixformerv2_engine_small"] >> mixformerv2_engine_small;
+    }
+    if (!fs["mixformerv2_engine_base"].empty()) {
+        fs["mixformerv2_engine_base"] >> mixformerv2_engine_base;
     }
     fs["output_dir"] >> output_dir;
     fs["show_preview"] >> show_preview;
@@ -200,6 +216,9 @@ int main(int argc, char* argv[]) {
     int mixformerv2_search_size = 0;
     float mixformerv2_template_factor = 0.f;
     float mixformerv2_search_factor = 0.f;
+    int mixformerv2_update_interval = -1;
+    float mixformerv2_max_score_decay = -1.f;
+    float mixformerv2_template_update_score_threshold = -1.f;
     if (!fs["mixformerv2_template_size"].empty()) {
         fs["mixformerv2_template_size"] >> mixformerv2_template_size;
     }
@@ -211,6 +230,16 @@ int main(int argc, char* argv[]) {
     }
     if (!fs["mixformerv2_search_factor"].empty()) {
         fs["mixformerv2_search_factor"] >> mixformerv2_search_factor;
+    }
+    if (!fs["mixformerv2_update_interval"].empty()) {
+        fs["mixformerv2_update_interval"] >> mixformerv2_update_interval;
+    }
+    if (!fs["mixformerv2_max_score_decay"].empty()) {
+        fs["mixformerv2_max_score_decay"] >> mixformerv2_max_score_decay;
+    }
+    if (!fs["mixformerv2_template_update_score_threshold"].empty()) {
+        fs["mixformerv2_template_update_score_threshold"] >>
+            mixformerv2_template_update_score_threshold;
     }
 
     std::string timestamp = getCurrentTimestamp();
@@ -291,8 +320,12 @@ int main(int argc, char* argv[]) {
     }
     
     // MixformerV2 跟踪器
-    if (!mixformerv2_engine.empty()) {
-        auto mixformer_tracker = new MixformerV2Wrapper(mixformerv2_engine);
+    auto add_mixformerv2_tracker = [&](const std::string &name,
+                                       const std::string &engine_path) {
+        if (engine_path.empty()) {
+            return;
+        }
+        auto mixformer_tracker = new MixformerV2Wrapper(engine_path);
         if (mixformerv2_template_size > 0) {
             mixformer_tracker->setTemplateSize(mixformerv2_template_size);
         }
@@ -305,12 +338,38 @@ int main(int argc, char* argv[]) {
         if (mixformerv2_search_factor > 0.f) {
             mixformer_tracker->setSearchFactor(mixformerv2_search_factor);
         }
-        trackers.push_back({"MixformerV2", mixformer_tracker});
+        if (mixformerv2_update_interval > 0) {
+            mixformer_tracker->setUpdateInterval(mixformerv2_update_interval);
+        }
+        if (mixformerv2_max_score_decay >= 0.f) {
+            mixformer_tracker->setMaxScoreDecay(mixformerv2_max_score_decay);
+        }
+        if (mixformerv2_template_update_score_threshold >= 0.f) {
+            mixformer_tracker->setTemplateUpdateScoreThreshold(
+                mixformerv2_template_update_score_threshold);
+        }
+        trackers.push_back({name, mixformer_tracker});
+    };
+
+    add_mixformerv2_tracker("MixformerV2Base", mixformerv2_engine_base);
+    add_mixformerv2_tracker("MixformerV2Small", mixformerv2_engine_small);
+    if (mixformerv2_engine_base.empty() && mixformerv2_engine_small.empty()) {
+        add_mixformerv2_tracker("MixformerV2", mixformerv2_engine);
     }
     
     if (trackers.empty()) {
         std::cerr << "错误: 未配置任何跟踪器引擎" << std::endl;
         return -1;
+    }
+
+    int nanotrack_index = -1;
+    std::vector<int> mixformerv2_indexes;
+    for (size_t i = 0; i < trackers.size(); ++i) {
+        if (trackers[i].first == "NanoTrack") {
+            nanotrack_index = static_cast<int>(i);
+        } else if (trackers[i].first.find("MixformerV2") == 0) {
+            mixformerv2_indexes.push_back(static_cast<int>(i));
+        }
     }
 
     DrOBB init_bbox;
@@ -326,6 +385,31 @@ int main(int argc, char* argv[]) {
             return -1;
         }
         std::cout << tracker_pair.first << " 初始化成功!" << std::endl;
+    }
+
+    std::vector<cv::VideoWriter> per_tracker_writers(trackers.size());
+    std::vector<std::string> per_tracker_video_paths(trackers.size());
+    std::vector<bool> per_tracker_writer_open(trackers.size(), false);
+    auto make_safe_name = [](std::string name) {
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        for (char &c : name) {
+            if (!std::isalnum(static_cast<unsigned char>(c))) {
+                c = '_';
+            }
+        }
+        return name;
+    };
+    for (size_t i = 0; i < trackers.size(); ++i) {
+        std::string safe_name = make_safe_name(trackers[i].first);
+        per_tracker_video_paths[i] =
+            output_dir + "/tracking_" + safe_name + "_" + timestamp + ".mp4";
+        per_tracker_writers[i].open(per_tracker_video_paths[i], fourcc, fps, cv::Size(width, height));
+        if (!per_tracker_writers[i].isOpened()) {
+            std::cerr << "警告: 无法创建单独输出视频: " << per_tracker_video_paths[i] << std::endl;
+            continue;
+        }
+        per_tracker_writer_open[i] = true;
+        std::cout << "单独输出视频: " << per_tracker_video_paths[i] << std::endl;
     }
 
     std::ofstream info_file(output_info_path);
@@ -364,6 +448,11 @@ int main(int argc, char* argv[]) {
     track_times_ms.reserve(total_frames);
     std::vector<double> per_tracker_total_ms(trackers.size(), 0.0);
     std::vector<size_t> per_tracker_count(trackers.size(), 0);
+    std::vector<double> per_tracker_window_ms(trackers.size(), 0.0);
+    std::vector<size_t> per_tracker_window_count(trackers.size(), 0);
+    std::vector<double> per_tracker_window_fps(trackers.size(), 0.0);
+    auto window_start_time = std::chrono::high_resolution_clock::now();
+    const double window_seconds = 3.0;
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -389,10 +478,37 @@ int main(int argc, char* argv[]) {
             track_times_ms.push_back(track_time_ms);
             per_tracker_total_ms[ti] += track_time_ms;
             per_tracker_count[ti] += 1;
+            per_tracker_window_ms[ti] += track_time_ms;
+            per_tracker_window_count[ti] += 1;
             double track_fps_model = track_time_ms > 0.0 ? 1000.0 / track_time_ms : 0.0;
             per_model_fps.push_back(track_fps_model);
 
             tracking_results.push_back({tracker_pair.first, tracked});
+        }
+
+        auto window_now = std::chrono::high_resolution_clock::now();
+        double window_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(window_now - window_start_time).count();
+        if (window_elapsed >= window_seconds) {
+            for (size_t i = 0; i < trackers.size(); ++i) {
+                if (per_tracker_window_count[i] > 0) {
+                    double avg_ms = per_tracker_window_ms[i] / static_cast<double>(per_tracker_window_count[i]);
+                    per_tracker_window_fps[i] = avg_ms > 0.0 ? 1000.0 / avg_ms : 0.0;
+                } else {
+                    per_tracker_window_fps[i] = 0.0;
+                }
+                per_tracker_window_ms[i] = 0.0;
+                per_tracker_window_count[i] = 0;
+            }
+            window_start_time = window_now;
+        } else {
+            for (size_t i = 0; i < trackers.size(); ++i) {
+                if (per_tracker_window_count[i] > 0) {
+                    double avg_ms = per_tracker_window_ms[i] / static_cast<double>(per_tracker_window_count[i]);
+                    per_tracker_window_fps[i] = avg_ms > 0.0 ? 1000.0 / avg_ms : 0.0;
+                } else {
+                    per_tracker_window_fps[i] = 0.0;
+                }
+            }
         }
 
         // 获取第一个跟踪器的结果用于视频输出（可视化）
@@ -413,12 +529,12 @@ int main(int argc, char* argv[]) {
             cv::Scalar(0, 255, 255)   // 黄色：其他
         };
 
-        for (size_t i = 0; i < tracking_results.size(); ++i) {
+        auto draw_tracker_overlay = [&](cv::Mat &img, size_t i) {
             const DrOBB& tracked_result = tracking_results[i].second;
             cv::Scalar color = colors[i % 3];
 
             // 绘制目标框
-            cv::rectangle(output_frame,
+            cv::rectangle(img,
                          cv::Point(tracked_result.box.x0, tracked_result.box.y0),
                          cv::Point(tracked_result.box.x1, tracked_result.box.y1),
                          (tracked_result.score >= confidence_threshold ? color : cv::Scalar(0, 0, 255)), 2);
@@ -436,7 +552,23 @@ int main(int argc, char* argv[]) {
             const int margin = 5;
             int text_x0 = std::max(0, static_cast<int>(tracked_result.box.x0));
             int text_y0;
-            if (i % 2 == 0) { // 顶部
+            std::string tracker_name_lower = tracking_results[i].first;
+            std::transform(tracker_name_lower.begin(), tracker_name_lower.end(), tracker_name_lower.begin(), ::tolower);
+            const bool place_left = tracker_name_lower.find("mixformerv2small") != std::string::npos;
+            if (place_left) {
+                const int anchor_x = static_cast<int>(tracked_result.box.x0);
+                const int anchor_y = static_cast<int>(tracked_result.box.y0);
+                text_x0 = anchor_x - text_size.width - margin;
+                if (text_x0 < 0) {
+                    text_x0 = 0;
+                }
+                text_y0 = anchor_y;
+                if (text_y0 + text_size.height + baseline > output_frame.rows) {
+                    text_y0 = std::max(0, output_frame.rows - text_size.height - baseline);
+                } else if (text_y0 < 0) {
+                    text_y0 = 0;
+                }
+            } else if (i % 2 == 0) { // 顶部
                 text_y0 = static_cast<int>(tracked_result.box.y0) - text_size.height - baseline - margin;
                 text_y0 = std::max(text_y0, 0);
             } else {         // 底部
@@ -449,25 +581,106 @@ int main(int argc, char* argv[]) {
             cv::Point rect_tl(text_x0, text_y0);
             cv::Point rect_br(text_x0 + text_size.width, text_y0 + text_size.height + baseline);
             if (ok) {
-                cv::rectangle(output_frame, rect_tl, rect_br, color, -1);
-                cv::putText(output_frame, label,
+                cv::rectangle(img, rect_tl, rect_br, color, -1);
+                cv::putText(img, label,
                            cv::Point(text_x0, text_y0 + text_size.height),
                            cv::FONT_HERSHEY_SIMPLEX, 0.5,
                            cv::Scalar(0, 0, 0), 2);
             } else {
-                cv::rectangle(output_frame, rect_tl, rect_br, cv::Scalar(0, 0, 255), -1);
-                cv::putText(output_frame, label,
+                cv::rectangle(img, rect_tl, rect_br, cv::Scalar(0, 0, 255), -1);
+                cv::putText(img, label,
                            cv::Point(text_x0, text_y0 + text_size.height),
                            cv::FONT_HERSHEY_SIMPLEX, 0.5,
                            cv::Scalar(255, 255, 255), 2);
             }
+        };
+
+        for (size_t i = 0; i < tracking_results.size(); ++i) {
+            draw_tracker_overlay(output_frame, i);
         }
 
         cv::putText(output_frame, cv::format("Frame: %d/%d", frame_idx + 1, total_frames),
                    cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
                    cv::Scalar(255, 255, 255), 2);
 
+        if (nanotrack_index >= 0 || !mixformerv2_indexes.empty()) {
+            const int padding = 6;
+            const int margin = 10;
+            std::vector<std::string> fps_lines;
+            if (nanotrack_index >= 0) {
+                double fps_value = per_tracker_window_fps[nanotrack_index];
+                std::string fps_text = fps_value > 0.0
+                    ? cv::format("nanotrack avg fps: %.1f", fps_value)
+                    : "nanotrack avg fps: --";
+                fps_lines.push_back(fps_text);
+            }
+            for (int idx : mixformerv2_indexes) {
+                double fps_value = per_tracker_window_fps[idx];
+                std::string name = trackers[idx].first;
+                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                std::string fps_text = fps_value > 0.0
+                    ? cv::format("%s avg fps: %.1f", name.c_str(), fps_value)
+                    : cv::format("%s avg fps: --", name.c_str());
+                fps_lines.push_back(fps_text);
+            }
+
+            int max_width = 0;
+            int total_height = 0;
+            std::vector<cv::Size> text_sizes;
+            std::vector<int> baselines;
+            for (const auto &line : fps_lines) {
+                int baseline = 0;
+                cv::Size text_size = cv::getTextSize(line, cv::FONT_HERSHEY_SIMPLEX, 0.6, 2, &baseline);
+                text_sizes.push_back(text_size);
+                baselines.push_back(baseline);
+                max_width = std::max(max_width, text_size.width);
+                total_height += text_size.height + baseline;
+            }
+            total_height += static_cast<int>(fps_lines.size() - 1) * 4;
+
+            int box_x = std::max(0, output_frame.cols - max_width - padding * 2 - margin);
+            int box_y = margin;
+            int box_w = max_width + padding * 2;
+            int box_h = total_height + padding * 2;
+            if (box_x + box_w > output_frame.cols) {
+                box_x = std::max(0, output_frame.cols - box_w);
+            }
+
+            cv::rectangle(output_frame,
+                         cv::Point(box_x, box_y),
+                         cv::Point(box_x + box_w, box_y + box_h),
+                         cv::Scalar(0, 0, 0), -1);
+
+            int text_y = box_y + padding;
+            for (size_t i = 0; i < fps_lines.size(); ++i) {
+                text_y += text_sizes[i].height;
+                cv::putText(output_frame, fps_lines[i],
+                           cv::Point(box_x + padding, text_y),
+                           cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                           cv::Scalar(255, 255, 255), 2);
+                text_y += baselines[i] + 4;
+            }
+        }
+
         writer.write(output_frame);
+        for (size_t i = 0; i < tracking_results.size() && i < per_tracker_writers.size(); ++i) {
+            if (!per_tracker_writer_open[i]) {
+                continue;
+            }
+            cv::Mat single_frame = frame.clone();
+            draw_tracker_overlay(single_frame, i);
+            cv::putText(single_frame, cv::format("Frame: %d/%d", frame_idx + 1, total_frames),
+                       cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                       cv::Scalar(255, 255, 255), 2);
+            double fps_value = per_tracker_window_fps[i];
+            std::string fps_text = fps_value > 0.0
+                ? cv::format("avg fps: %.1f", fps_value)
+                : "avg fps: --";
+            cv::putText(single_frame, fps_text,
+                       cv::Point(10, 55), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                       cv::Scalar(255, 255, 255), 2);
+            per_tracker_writers[i].write(single_frame);
+        }
 
         if (info_file.is_open()) {
             info_file << frame_idx;
@@ -564,6 +777,11 @@ int main(int argc, char* argv[]) {
 
     cap.release();
     writer.release();
+    for (auto &w : per_tracker_writers) {
+        if (w.isOpened()) {
+            w.release();
+        }
+    }
 
     // 清理跟踪器
     for (auto &tracker_pair : trackers) {

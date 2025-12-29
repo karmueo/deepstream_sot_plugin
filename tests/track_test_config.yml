@@ -19,5 +19,10 @@ nanotrack_search_backbone_engine: models/nanotrack_backbone_search_fp16.engine
 mixformerv2_engine: models/mixformerv2_online_base_fp16.engine
 # mixformerv2_template_size: 112  # 可选，不设置则使用默认值
 # mixformerv2_search_size: 224    # 可选，不设置则使用默认值
-# mixformerv2_template_factor: 2.0  # 可选，不设置则使用默认值
-# mixformerv2_search_factor: 4.0    # 可选，不设置则使用默认值
+# mixformerv2_template_factor: 2.0  # 模板裁剪范围倍率，越大越“宽松”，但易引入背景干扰
+# mixformerv2_search_factor: 4.0    # 搜索区域倍率，越大越不易丢目标但更易跳到相似目标
+# 在线模板更新与稳定性（可选）
+# mixformerv2_update_interval: 200  # 在线模板更新间隔（帧），建议 300~500 可降低“跳目标”
+# mixformerv2_max_score_decay: 0.95  # 历史最高分衰减系数，建议 0.97~0.99 更保守
+# mixformerv2_template_update_score_threshold: 0.5  # 刷新在线模板阈值，建议 0.7~0.85
+# 注意：tests/test_track.cpp 目前未读取以上 3 个字段，仅作说明；如需生效请同步修改代码

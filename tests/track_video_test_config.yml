@@ -1,5 +1,6 @@
 %YAML:1.0
-video_path: tests/test_video2.mp4
+video_path: tests/test_video.mp4
+# video_path: tests/test_video2.mp4
 
 # NanoTrack 配置
 # nanotrack_mode: merge 或 split
@@ -12,15 +13,23 @@ nanotrack_exemplar_size: 127
 nanotrack_instance_size: 255
 
 # MixformerV2 配置（可选，如果为空则只使用 NanoTrack）
-mixformerv2_engine: models/mixformerv2_online_base_fp16.engine
-mixformerv2_template_size: 112
-mixformerv2_search_size: 224
+# 兼容旧字段：mixformerv2_engine 仍可用
+mixformerv2_engine_base: models/mixformerv2_online_base_fp16.engine
+mixformerv2_engine_small: models/mixformerv2_online_small_fp16.engine
+# mixformerv2_engine: models/mixformerv2_online_base_fp16.engine
+mixformerv2_template_size: 0
+mixformerv2_search_size: 0
 # 可选缩放因子（不设置使用默认）
-# mixformerv2_template_factor: 2.0
-# mixformerv2_search_factor: 4.0
+mixformerv2_template_factor: 1.5  # 模板裁剪范围倍率，越大越“宽松”，但易引入背景干扰
+mixformerv2_search_factor: 3.0    # 搜索区域倍率，越大越不易丢目标但更易跳到相似目标
+# 在线模板更新与稳定性（可选）
+mixformerv2_update_interval: 500  # 在线模板更新间隔（帧），建议 300~500 可降低“跳目标”
+mixformerv2_max_score_decay: 0.98  # 历史最高分衰减系数，建议 0.97~0.99 更保守
+mixformerv2_template_update_score_threshold: 0.8  # 刷新在线模板阈值，建议 0.7~0.85
 
 # 公共配置
-init_bbox: [853, 566, 894, 583]
-confidence_threshold: 0.75
+# init_bbox: [853, 566, 894, 583]
+init_bbox: [1003, 366, 1030, 384]
+confidence_threshold: 0.8
 output_dir: tests/output_videos
 show_preview: false
