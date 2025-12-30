@@ -11,6 +11,8 @@
 #include <memory>
 #include "deepTracker.h"
 #include <yaml-cpp/yaml.h>
+#include <chrono>
+#include <unordered_map>
 
 #define MAX_TARGETS_PER_STREAM 512
 
@@ -65,6 +67,15 @@ protected:
     std::shared_ptr<DeepTracker> tracker_;
     int tmpId_ = 0;
     TRACKER_CONFIG trackerConfig_; // 跟踪器配置
+    struct FpsState
+    {
+        std::chrono::steady_clock::time_point lastUpdate{};
+        uint32_t frameCount = 0;
+        double fps = 0.0;
+        bool hasValue = false;
+    };
+    std::unordered_map<NvMOTStreamId, FpsState> fpsState_;
+    std::chrono::seconds fpsUpdateInterval_{3};
 };
 
 #endif // DNSTARPROD_TRACKER_H

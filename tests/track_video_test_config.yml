@@ -1,6 +1,7 @@
 %YAML:1.0
 video_path: tests/test_video.mp4
 # video_path: tests/test_video2.mp4
+# video_path: tests/test_video3.mp4
 
 # NanoTrack 配置
 # nanotrack_mode: merge 或 split
@@ -28,8 +29,9 @@ mixformerv2_max_score_decay: 0.98  # 历史最高分衰减系数，建议 0.97~0
 mixformerv2_template_update_score_threshold: 0.8  # 刷新在线模板阈值，建议 0.7~0.85
 
 # 公共配置
-# init_bbox: [853, 566, 894, 583]
 init_bbox: [1003, 366, 1030, 384]
+# init_bbox: [853, 566, 894, 583]
+# init_bbox: [1480, 400, 1505, 419]
 confidence_threshold: 0.8
 output_dir: tests/output_videos
 show_preview: false

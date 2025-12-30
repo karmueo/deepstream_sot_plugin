@@ -529,9 +529,14 @@ int main(int argc, char* argv[]) {
             cv::Scalar(0, 255, 255)   // 黄色：其他
         };
 
-        auto draw_tracker_overlay = [&](cv::Mat &img, size_t i) {
+        auto draw_tracker_overlay = [&](cv::Mat &img, size_t i, double font_scale_factor) {
             const DrOBB& tracked_result = tracking_results[i].second;
             cv::Scalar color = colors[i % 3];
+            const double label_font_scale = 0.5 * font_scale_factor;
+            int label_thickness = static_cast<int>(std::round(2 * font_scale_factor));
+            if (label_thickness < 1) {
+                label_thickness = 1;
+            }
 
             // 绘制目标框
             cv::rectangle(img,
@@ -546,10 +551,10 @@ int main(int argc, char* argv[]) {
                 : cv::format("%s Lost (%.3f)", tracking_results[i].first.c_str(), tracked_result.score);
 
             int baseline = 0;
-            cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 2, &baseline);
+            cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, label_font_scale, label_thickness, &baseline);
 
             // 交替上下放置文字，避免互相遮挡
-            const int margin = 5;
+            const int margin = std::max(2, static_cast<int>(std::round(5 * font_scale_factor)));
             int text_x0 = std::max(0, static_cast<int>(tracked_result.box.x0));
             int text_y0;
             std::string tracker_name_lower = tracking_results[i].first;
@@ -584,19 +589,19 @@ int main(int argc, char* argv[]) {
                 cv::rectangle(img, rect_tl, rect_br, color, -1);
                 cv::putText(img, label,
                            cv::Point(text_x0, text_y0 + text_size.height),
-                           cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                           cv::Scalar(0, 0, 0), 2);
+                           cv::FONT_HERSHEY_SIMPLEX, label_font_scale,
+                           cv::Scalar(0, 0, 0), label_thickness);
             } else {
                 cv::rectangle(img, rect_tl, rect_br, cv::Scalar(0, 0, 255), -1);
                 cv::putText(img, label,
                            cv::Point(text_x0, text_y0 + text_size.height),
-                           cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                           cv::Scalar(255, 255, 255), 2);
+                           cv::FONT_HERSHEY_SIMPLEX, label_font_scale,
+                           cv::Scalar(255, 255, 255), label_thickness);
             }
         };
 
         for (size_t i = 0; i < tracking_results.size(); ++i) {
-            draw_tracker_overlay(output_frame, i);
+            draw_tracker_overlay(output_frame, i, 1.0);
         }
 
         cv::putText(output_frame, cv::format("Frame: %d/%d", frame_idx + 1, total_frames),
@@ -668,17 +673,17 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             cv::Mat single_frame = frame.clone();
-            draw_tracker_overlay(single_frame, i);
+            draw_tracker_overlay(single_frame, i, 2.0);
             cv::putText(single_frame, cv::format("Frame: %d/%d", frame_idx + 1, total_frames),
-                       cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                       cv::Scalar(255, 255, 255), 2);
+                       cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.4,
+                       cv::Scalar(255, 255, 255), 4);
             double fps_value = per_tracker_window_fps[i];
             std::string fps_text = fps_value > 0.0
                 ? cv::format("avg fps: %.1f", fps_value)
                 : "avg fps: --";
             cv::putText(single_frame, fps_text,
-                       cv::Point(10, 55), cv::FONT_HERSHEY_SIMPLEX, 0.6,
-                       cv::Scalar(255, 255, 255), 2);
+                       cv::Point(10, 65), cv::FONT_HERSHEY_SIMPLEX, 1.2,
+                       cv::Scalar(255, 255, 255), 4);
             per_tracker_writers[i].write(single_frame);
         }
 

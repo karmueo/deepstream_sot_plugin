@@ -1,5 +1,6 @@
 #include "Tracker.h"
 #include <cuda_runtime.h>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <utility>
@@ -139,6 +140,39 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         uint32_t  matchedDetectId = std::numeric_limits<uint32_t>::max();
         trackInfo = tracker_->update(bgrFrame, &frame->objectsIn,
                                      frame->frameNum, &matchedDetectId);
+
+        // 计算并显示FPS（每3秒更新一次）
+        auto now = std::chrono::steady_clock::now();
+        FpsState &fpsState = fpsState_[frame->streamID];
+        if (fpsState.lastUpdate.time_since_epoch().count() == 0)
+        {
+            fpsState.lastUpdate = now;
+        }
+        fpsState.frameCount += 1;
+        std::chrono::duration<double> elapsed = now - fpsState.lastUpdate;
+        if (elapsed.count() >= fpsUpdateInterval_.count())
+        {
+            fpsState.fps = fpsState.frameCount / elapsed.count();
+            fpsState.frameCount = 0;
+            fpsState.lastUpdate = now;
+            fpsState.hasValue = true;
+        }
+
+        if (fpsState.hasValue)
+        {
+            char fpsText[64];
+            std::snprintf(fpsText, sizeof(fpsText), "FPS: %.2f", fpsState.fps);
+            int baseline = 0;
+            cv::Size textSize = cv::getTextSize(fpsText, cv::FONT_HERSHEY_SIMPLEX,
+                                                0.7, 2, &baseline);
+            int x = static_cast<int>(bufferParams->width) - textSize.width - 12;
+            int y = textSize.height + 12;
+            if (x < 0) x = 0;
+            if (y < textSize.height) y = textSize.height + 2;
+            cv::putText(rgbaFrame, fpsText, cv::Point(x, y),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                        cv::Scalar(0, 255, 0, 255), 2);
+        }
 
         NvMOTObjToTrack *associatedObjectIn =
             extractMatchedDetection(frame, matchedDetectId);
