@@ -158,22 +158,6 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
             fpsState.hasValue = true;
         }
 
-        if (fpsState.hasValue)
-        {
-            char fpsText[64];
-            std::snprintf(fpsText, sizeof(fpsText), "FPS: %.2f", fpsState.fps);
-            int baseline = 0;
-            cv::Size textSize = cv::getTextSize(fpsText, cv::FONT_HERSHEY_SIMPLEX,
-                                                0.7, 2, &baseline);
-            int x = static_cast<int>(bufferParams->width) - textSize.width - 12;
-            int y = textSize.height + 12;
-            if (x < 0) x = 0;
-            if (y < textSize.height) y = textSize.height + 2;
-            cv::putText(rgbaFrame, fpsText, cv::Point(x, y),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                        cv::Scalar(0, 255, 0, 255), 2);
-        }
-
         NvMOTObjToTrack *associatedObjectIn =
             extractMatchedDetection(frame, matchedDetectId);
 

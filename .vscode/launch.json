@@ -11,7 +11,7 @@
             "program": "${workspaceRoot}/../build/deepstream-app",
             "args": [
                 "-c",
-                "${workspaceRoot}/../src/deepstream-app/configs/rgb_app_config.txt"
+                "${workspaceRoot}/../src/deepstream-app/configs/yml/app_config.yml"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}/..",
