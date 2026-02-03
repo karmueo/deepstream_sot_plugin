@@ -69,16 +69,16 @@ NvMOTContext::NvMOTContext(const NvMOTConfig   &configIn,
                   << configIn.customConfigFilePath << std::endl;
     }
 
-    if (!trackerConfig_.modelFilePath.empty())
+    if (!trackerConfig_.mixformerV2.modelFilePath.empty())
     {
-        std::ifstream ifs(trackerConfig_.modelFilePath);
+        std::ifstream ifs(trackerConfig_.mixformerV2.modelFilePath);
         if (!ifs.good())
         {
             std::cerr << "Warning: model file not found at "
-                      << trackerConfig_.modelFilePath << "." << std::endl;
+                      << trackerConfig_.mixformerV2.modelFilePath << "." << std::endl;
         }
     }
-    tracker_ = std::make_shared<DeepTracker>(trackerConfig_.modelFilePath,
+    tracker_ = std::make_shared<DeepTracker>(trackerConfig_.mixformerV2.modelFilePath,
                                              trackerConfig_);
 }
 

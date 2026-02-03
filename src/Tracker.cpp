@@ -45,10 +45,6 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
                 trackerConfig.modelName = MODEL_MIXFORMERV2; // 默认设置为 MixFormerV2
             }
         }
-        else if (key == "modelFilePath")
-        {
-            trackerConfig.modelFilePath = itr->second.as<std::string>();
-        }
         else if (key == "enableTrackCenterStable")
         {
             trackerConfig.enableTrackCenterStable = itr->second.as<int>() != 0; // 0 视为 false 其它为 true
@@ -169,6 +165,11 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
 
         if (mixformerNode)
         {
+            if (mixformerNode["modelFilePath"])
+            {
+                trackerConfig.mixformerV2.modelFilePath = mixformerNode["modelFilePath"].as<std::string>();
+            }
+
             if (mixformerNode["update_interval"])
             {
                 int interval = mixformerNode["update_interval"].as<int>();

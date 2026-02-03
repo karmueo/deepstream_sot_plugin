@@ -34,6 +34,7 @@
 | 0 | MODEL_SUTRACK | SuTrack | 轻量级、较快响应 |
 | 1 | MODEL_OSTRACK | OSTrack | 稳定的 Transformer 跟踪 |
 | 2 | MODEL_MIXFORMERV2 | MixFormerV2 | 融合特征、在线模板更新能力强 |
+| 3 | MODEL_NANOTRACK | NanoTrack | 轻量级孪生网络跟踪（split 模式） |
 
 核心特性：
 * TensorRT 引擎加载与推理（FP32 / FP16 引擎均可，只要已生成）
@@ -133,8 +134,7 @@ bash convert2trt.sh your_model.onnx output.engine fp16
 示例：
 ```yaml
 BaseConfig:
-  modelName: 2                 # 0=sutrack, 1=ostrack, 2=mixformer_v2
-  modelFilePath: /abs/path/mixformerv2_online_base_fp16.engine
+  modelName: 2                 # 0=sutrack, 1=ostrack, 2=mixformer_v2, 3=nanotrack
   enableTrackCenterStable: 1   # 是否启用跟踪中心稳定性判定
   trackCenterStablePixelThreshold: 3
 
@@ -149,18 +149,25 @@ TargetManagement:
   maxTrackAge: 30
 
 MixformerV2Config:
+  modelFilePath: /abs/path/mixformerv2_online_base_fp16.engine
   update_interval: 100
   max_score_decay: 0.95
   template_update_score_threshold: 0.5
+
+NanotrackConfig:
+  nanotrack_head_engine: /abs/path/nanotrack_head_fp16.engine
+  nanotrack_backbone_engine: /abs/path/nanotrack_backbone_fp16.engine
+  nanotrack_search_backbone_engine: /abs/path/nanotrack_backbone_search_fp16.engine
+  # nanotrack_exemplar_size: 127  # 可选，不设置则使用默认值
+  # nanotrack_instance_size: 255  # 可选，不设置则使用默认值
 ```
 
 字段含义：
 * BaseConfig.modelName：选择具体模型枚举（见第 2 节）。
-* BaseConfig.modelFilePath：TensorRT Engine 绝对路径（或相对工作目录）。
 * enableTrackCenterStable：启用后，会统计跟踪中心位置波动，过滤稳定但可能错误的目标。
 * trackCenterStablePixelThreshold：中心像素标准差阈值，越小越严格。
 * TargetManagement.expandFactor：初始化 / 更新时对目标框进行放大裁剪的比例。
-* probationAge：达到该“年龄”后才认定为稳定跟踪（可避免一开始噪声）。
+* probationAge：达到该"年龄"后才认定为稳定跟踪（可避免一开始噪声）。
 * maxMiss：连续多少帧未成功更新则判定丢失。
 * scoreThreshold：模型输出分数低于该值可视为无效/低可信。
 * iouThreshold：当前预测与上一帧 / 检测框的匹配 IOU 下限。
@@ -169,6 +176,9 @@ MixformerV2Config:
 * MixformerV2Config.update_interval：模板在线更新的帧间隔。
 * MixformerV2Config.max_score_decay：最大历史分数的衰减系数（防止一直保持旧峰值）。
 * template_update_score_threshold：达到该分数且到达更新间隔才会刷新在线模板。
+* NanotrackConfig.nanotrack_head_engine：head 引擎文件路径。
+* NanotrackConfig.nanotrack_backbone_engine：backbone 引擎文件路径。
+* NanotrackConfig.nanotrack_search_backbone_engine：search backbone 引擎文件路径。
 
 ---
 ## 8. 在 DeepStream 中的使用示例
@@ -211,7 +221,7 @@ Q: 性能不达预期？
 A: 检查是否使用 FP16 引擎；确认无不必要的图像拷贝；使用 `nvidia-smi dmon` 观察显存与 GPU 利用率。
 
 Q: 想切换模型？
-A: 修改 `config_sot.yml` 中 `modelName` 与 `modelFilePath`，保证引擎文件与实际模型结构匹配。
+A: 修改 `config_sot.yml` 中 `modelName`，若使用 MixFormerV2 还需修改 `MixformerV2Config.modelFilePath`，保证引擎文件与实际模型结构匹配。
 
 Q: MixFormerV2 模板一直不更新？
 A: 检查当前最大分数是否达到 `template_update_score_threshold` 且是否满足 `update_interval`。

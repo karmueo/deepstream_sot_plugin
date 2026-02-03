@@ -37,13 +37,14 @@ struct TARGET_MANAGEMENT
 
 struct MIXFORMERV2_CONFIG
 {
-    int   updateInterval = 200;                // 模板更新间隔（帧）
-    float maxScoreDecay = 0.95f;               // 最大分数衰减系数
-    float templateUpdateScoreThreshold = 0.5f; // 模板更新分数阈值
-    int   templateSize = 112;                  // 模板尺寸
-    int   searchSize = 224;                    // 搜索区域尺寸
-    float templateFactor = 2.0f;               // 模板缩放系数
-    float searchFactor = 4.0f;                 // 搜索区域缩放系数
+    std::string    modelFilePath;                                        // 模型引擎文件路径
+    int            updateInterval = 200;                // 模板更新间隔（帧）
+    float          maxScoreDecay = 0.95f;               // 最大分数衰减系数
+    float          templateUpdateScoreThreshold = 0.5f; // 模板更新分数阈值
+    int            templateSize = 112;                  // 模板尺寸
+    int            searchSize = 224;                    // 搜索区域尺寸
+    float          templateFactor = 2.0f;               // 模板缩放系数
+    float          searchFactor = 4.0f;                 // 搜索区域缩放系数
 };
 
 enum NANOTRACK_MODE
@@ -65,7 +66,6 @@ struct NANOTRACK_CONFIG
 
 struct TRACKER_CONFIG
 {
-    std::string       modelFilePath;                                   // 模型文件路径（可选，自定义）
     MODEL_NAME        modelName     = MODEL_SUTRACK;                 // 模型类型
     TARGET_MANAGEMENT targetManagement;                              // 目标管理配置
     uint32_t          confirmAgeThreshold = 5;                       // 确认跟踪的年龄阈值，默认5
