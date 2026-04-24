@@ -61,6 +61,38 @@ void NanotrackTRT::setInstanceSize(int size)
     }
 }
 
+void NanotrackTRT::setWindowInfluence(float value)
+{
+    if (value >= 0.f && value <= 1.f)
+    {
+        this->cfg_.window_influence = value;
+    }
+}
+
+void NanotrackTRT::setPenaltyK(float value)
+{
+    if (value >= 0.f)
+    {
+        this->cfg_.penalty_k = value;
+    }
+}
+
+void NanotrackTRT::setLearningRate(float value)
+{
+    if (value >= 0.f && value <= 1.f)
+    {
+        this->cfg_.lr = value;
+    }
+}
+
+void NanotrackTRT::setContextAmount(float value)
+{
+    if (value > 0.f)
+    {
+        this->cfg_.context_amount = value;
+    }
+}
+
 void NanotrackTRT::loadEngine(const std::string &engine_name,
                               TrtEngineHandle &handle)
 {
@@ -640,10 +672,21 @@ int NanotrackTRT::init(const cv::Mat &img, DrOBB bbox)
 
 const DrOBB &NanotrackTRT::track(const cv::Mat &img)
 {
+    const DrOBB &candidate = trackCandidate(img);
+    if (candidate.score > 0.f)
+    {
+        commitCandidate();
+    }
+    return this->object_box;
+}
+
+const DrOBB &NanotrackTRT::trackCandidate(const cv::Mat &img)
+{
     if (img.empty() || this->zf_.empty())
     {
-        std::memset(&this->object_box, 0, sizeof(DrOBB));
-        return this->object_box;
+        std::memset(&this->pending_object_box_, 0, sizeof(DrOBB));
+        this->has_pending_candidate_ = false;
+        return this->pending_object_box_;
     }
 
     float w_z = this->size_.x +
@@ -672,8 +715,9 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
             this->merge_input_x_hw_.first != this->cfg_.instance_size)
         {
             std::cerr << "Nanotrack: search size mismatch with engine input\n";
-            std::memset(&this->object_box, 0, sizeof(DrOBB));
-            return this->object_box;
+            std::memset(&this->pending_object_box_, 0, sizeof(DrOBB));
+            this->has_pending_candidate_ = false;
+            return this->pending_object_box_;
         }
 
         auto merge_outputs =
@@ -688,8 +732,9 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
             this->search_input_hw_.first != this->cfg_.instance_size)
         {
             std::cerr << "Nanotrack: search size mismatch with engine input\n";
-            std::memset(&this->object_box, 0, sizeof(DrOBB));
-            return this->object_box;
+            std::memset(&this->pending_object_box_, 0, sizeof(DrOBB));
+            this->has_pending_candidate_ = false;
+            return this->pending_object_box_;
         }
 
         std::vector<int64_t> xf_shape;
@@ -713,8 +758,9 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
 
     if (score.empty() || pred_bbox.empty())
     {
-        std::memset(&this->object_box, 0, sizeof(DrOBB));
-        return this->object_box;
+        std::memset(&this->pending_object_box_, 0, sizeof(DrOBB));
+        this->has_pending_candidate_ = false;
+        return this->pending_object_box_;
     }
 
     auto change = [](float r) { return std::max(r, 1.f / r); };
@@ -748,6 +794,15 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
     auto best_iter = std::max_element(pscore.begin(), pscore.end());
     size_t best_idx =
         static_cast<size_t>(std::distance(pscore.begin(), best_iter));
+    float best_score = score[best_idx];
+    float second_score = 0.f;
+    for (size_t i = 0; i < score.size(); ++i)
+    {
+        if (i != best_idx)
+        {
+            second_score = std::max(second_score, score[i]);
+        }
+    }
 
     cv::Point2f bbox;
     bbox.x = pred_bbox[best_idx] / scale_z + this->center_pos_.x;
@@ -762,25 +817,47 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
 
     auto clipped =
         bbox_clip(bbox.x, bbox.y, width, height, img.rows, img.cols);
-    this->center_pos_ = cv::Point2f(clipped[0], clipped[1]);
-    this->size_ = cv::Point2f(clipped[2], clipped[3]);
+    this->pending_center_pos_ = cv::Point2f(clipped[0], clipped[1]);
+    this->pending_size_ = cv::Point2f(clipped[2], clipped[3]);
 
     DrBBox out_box;
-    out_box.cx = this->center_pos_.x;
-    out_box.cy = this->center_pos_.y;
-    out_box.w = this->size_.x;
-    out_box.h = this->size_.y;
+    out_box.cx = this->pending_center_pos_.x;
+    out_box.cy = this->pending_center_pos_.y;
+    out_box.w = this->pending_size_.x;
+    out_box.h = this->pending_size_.y;
     out_box.x0 = out_box.cx - 0.5f * out_box.w;
     out_box.y0 = out_box.cy - 0.5f * out_box.h;
     out_box.x1 = out_box.x0 + out_box.w;
     out_box.y1 = out_box.y0 + out_box.h;
 
-    this->last_score_ = score[best_idx];
-    this->state = out_box;
-    this->object_box.box = out_box;
-    this->object_box.score = this->last_score_;
+    this->last_score_ = best_score;
+    this->last_peak_ratio_ = best_score / std::max(second_score, 1e-6f);
+    this->pending_object_box_ = this->object_box;
+    this->pending_object_box_.box = out_box;
+    this->pending_object_box_.score = this->last_score_;
+    this->has_pending_candidate_ = true;
 
-    return this->object_box;
+    return this->pending_object_box_;
+}
+
+bool NanotrackTRT::commitCandidate()
+{
+    if (!this->has_pending_candidate_)
+    {
+        return false;
+    }
+
+    this->center_pos_ = this->pending_center_pos_;
+    this->size_ = this->pending_size_;
+    this->state = this->pending_object_box_.box;
+    this->object_box = this->pending_object_box_;
+    this->has_pending_candidate_ = false;
+    return true;
+}
+
+void NanotrackTRT::rejectCandidate()
+{
+    this->has_pending_candidate_ = false;
 }
 
 std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_merge(

@@ -2,18 +2,49 @@
 
 BaseConfig:
   modelName: 3    # { 0=sutrack, 1=ostrack, 2=mixformer_v2, 3=nanotrack }
-  enableTrackCenterStable: 1 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
-  trackCenterStablePixelThreshold: 3 # 稳定判断像素标准差阈值(越小越严格)
+  # 是否启用“中心长期稳定且不在画面中心”过滤(0=关闭,非0=开启)。
+  # 注意：旧逻辑会在 maxTrackAge 帧历史满后直接 reset，真实无人机悬停/云台随动时也可能被误杀，
+  # 进而打断 videorecognition 按 object_id 累积历史帧；当前默认关闭，主要依赖检测验证+外观门控防误跟。
+  enableTrackCenterStable: 0
+  # 仅当 enableTrackCenterStable=1 且当前跟踪已连续未被检测框验证时生效；
+  # 历史中心标准差低于该像素阈值会判为疑似墙面污点/静止背景，触发 reset。越小越严格、越不容易触发。
+  trackCenterStablePixelThreshold: 3
 
 TargetManagement:
   expandFactor: 1.0
   probationAge: 2
-  maxMiss: 10 # max number of frames to miss before target is removed
-  scoreThreshold: 0.75 # 跟踪置信度阈值
+  maxMiss: 4 # max number of frames to miss before target is removed
+  scoreThreshold: 0.5 # 兼容旧字段
+  # NanoTrack 候选分数低于该值时直接拒绝，不提交内部状态；调高会更快丢弃疑似墙面/天空误跟踪，但遮挡时更容易丢目标
+  lowScoreThreshold: 0.45
+  # 候选分数达到该值后可不依赖检测框继续跟踪，但仍需通过运动/外观门控；调高更保守，调低更容易连续跟踪但误跟风险更高
+  highScoreThreshold: 0.85
   iouThreshold: 0.5 # 跟踪框和检测框匹配的IOU阈值
   trackBoxWidthThreshold: 0.3 # 跟踪框最大宽度因子
   trackBoxHeightThreshold: 0.3 # 跟踪框最大高度因子
-  maxTrackAge: 30 # 跟踪历史长度
+  # 跟踪历史长度，同时也是中心稳定过滤的统计窗口；videorecognition 默认至少需要 32*5+10=170 帧连续 object_id 历史。
+  # 如果重新开启 enableTrackCenterStable，不要把该值设得过小，否则容易在视频识别攒够帧前重置轨迹。
+  maxTrackAge: 30
+  # 单帧中心最大跳变 = 上一帧目标对角线 * 该系数；超过则拒绝候选，防止突然跳到远处污点/背景
+  maxCenterJumpRatio: 3.0
+  # 单帧面积最大变化比例，使用 max(new_area/old_area, old_area/new_area)；超过则拒绝候选，防止尺度漂移
+  maxScaleChangeRatio: 2.0
+  # 单帧宽高比最大变化比例，使用 max(new_aspect/old_aspect, old_aspect/new_aspect)；超过则拒绝候选
+  maxAspectChangeRatio: 2.0
+  # 启用检测验证窗口；为0时不限制连续未验证输出，为正数时配合 maxUnverifiedFrames 限制纯跟踪持续时间
+  requireDetectorEveryNFrames: 15
+  # 候选框连续未与检测框匹配的最大帧数；超过后拒绝输出，避免目标丢失后长时间跟墙面/天空
+  maxUnverifiedFrames: 15
+  # 初始化和检测验证只接受该类别；当前无人机类别为1，设为-1表示不限制类别
+  targetClassId: 1
+  # 启用外观一致性校验：候选未匹配检测框时，会比较初始目标patch与当前候选patch的颜色/纹理
+  enableAppearanceCheck: 1
+  # HSV直方图相关性阈值，越高越要求颜色外观接近初始目标；过高可能拒绝光照变化下的真实目标
+  appearanceSimilarityThreshold: 0.25
+  # 候选patch灰度标准差下限；低于该值通常表示天空等均匀背景，会被拒绝
+  minPatchStdDev: 5.0
+  # 候选patch边缘像素占比下限；低于该值表示纹理/边缘太少，常见于天空背景，会被拒绝
+  minEdgeDensity: 0.001
 
 MixformerV2Config:
   modelFilePath: /opt/nvidia/deepstream/deepstream/sot_plugin/models/mixformerv2_online_base_fp16.engine
@@ -27,3 +58,11 @@ NanotrackConfig:
   nanotrack_search_backbone_engine: /opt/nvidia/deepstream/deepstream/sot_plugin/models/nanotrack_backbone_search_fp16.engine
   # nanotrack_exemplar_size: 127  # 可选，不设置则使用默认值
   # nanotrack_instance_size: 255  # 可选，不设置则使用默认值
+  # 汉宁窗影响系数，越大越偏向上一帧中心附近的响应点；调高可降低跳到远处相似背景的概率，但快速运动目标更易跟丢
+  window_influence: 0.50
+  # 尺度/宽高比变化惩罚，越大越抑制形状突变；调高可减少框突然变大/变形，过高会降低适应目标尺度变化能力
+  penalty_k: 0.18
+  # 状态更新学习率，越小越慢更新中心和尺寸；调低可减少漂移累积，过低会导致快速运动或尺度变化时滞后
+  lr: 0.25
+  # 模板/搜索区域上下文比例，越大裁剪区域包含越多背景；过大易引入墙面/天空干扰，过小则目标运动快时可能出搜索框
+  context_amount: 0.5

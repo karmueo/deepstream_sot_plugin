@@ -33,14 +33,30 @@ class NanotrackTRT : public BaseTrackTRT
     // 执行一次跟踪（输入：当前帧图像，输出：当前帧目标框）
     const DrOBB &track(const cv::Mat &img) override;
 
+    // 只计算候选框，不提交内部状态（输入：当前帧图像，输出：候选目标框）
+    const DrOBB &trackCandidate(const cv::Mat &img);
+
+    // 提交上一帧候选框为当前状态（输入：无，输出：是否提交成功）
+    bool commitCandidate();
+
+    // 放弃上一帧候选框（输入：无，输出：无）
+    void rejectCandidate();
+
     // 设置模板尺寸（输入：模板尺寸，输出：无）
     void setExemplarSize(int size);
 
     // 设置搜索尺寸（输入：搜索尺寸，输出：无）
     void setInstanceSize(int size);
 
+    void setWindowInfluence(float value);
+    void setPenaltyK(float value);
+    void setLearningRate(float value);
+    void setContextAmount(float value);
+
     // 获取上一帧得分（输出：置信度分数）
     float getLastScore() const { return this->last_score_; }
+
+    float getLastPeakRatio() const { return this->last_peak_ratio_; }
 
   private:
     struct TrackerConfig
@@ -139,6 +155,11 @@ class NanotrackTRT : public BaseTrackTRT
     std::vector<int64_t> zf_shape_;
     std::vector<int64_t> subwindow_shape_;
     float last_score_ = 0.f;
+    float last_peak_ratio_ = 1.f;
+    bool has_pending_candidate_ = false;
+    DrOBB pending_object_box_{};
+    cv::Point2f pending_center_pos_{0.f, 0.f};
+    cv::Point2f pending_size_{0.f, 0.f};
 
     struct TrtEngineHandle
     {

@@ -70,6 +70,9 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
         return -1;
     }
 
+    bool scoreThresholdSet = false;
+    bool lowScoreThresholdSet = false;
+    bool highScoreThresholdSet = false;
     for (YAML::const_iterator itr = configyml["TargetManagement"].begin();
          itr != configyml["TargetManagement"].end(); ++itr)
     {
@@ -102,11 +105,34 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
         }
         else if (key == "scoreThreshold")
         {
+            scoreThresholdSet = true;
             trackerConfig.targetManagement.scoreThreshold = itr->second.as<float>();
             if (trackerConfig.targetManagement.scoreThreshold < 0.0f || trackerConfig.targetManagement.scoreThreshold > 1.0f)
             {
                 trackerConfig.targetManagement.scoreThreshold = 0.3f; // 默认设置为0.3
                 std::cerr << "Invalid scoreThreshold in config file, set to default 0.3" << std::endl;
+            }
+        }
+        else if (key == "lowScoreThreshold")
+        {
+            lowScoreThresholdSet = true;
+            trackerConfig.targetManagement.lowScoreThreshold = itr->second.as<float>();
+            if (trackerConfig.targetManagement.lowScoreThreshold < 0.0f ||
+                trackerConfig.targetManagement.lowScoreThreshold > 1.0f)
+            {
+                trackerConfig.targetManagement.lowScoreThreshold = 0.35f;
+                std::cerr << "Invalid lowScoreThreshold in config file, set to default 0.35" << std::endl;
+            }
+        }
+        else if (key == "highScoreThreshold")
+        {
+            highScoreThresholdSet = true;
+            trackerConfig.targetManagement.highScoreThreshold = itr->second.as<float>();
+            if (trackerConfig.targetManagement.highScoreThreshold < 0.0f ||
+                trackerConfig.targetManagement.highScoreThreshold > 1.0f)
+            {
+                trackerConfig.targetManagement.highScoreThreshold = 0.65f;
+                std::cerr << "Invalid highScoreThreshold in config file, set to default 0.65" << std::endl;
             }
         }
         else if (key == "iouThreshold")
@@ -145,10 +171,107 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
                 std::cerr << "Invalid maxTrackAge in config file, set to default 1" << std::endl;
             }
         }
+        else if (key == "maxCenterJumpRatio")
+        {
+            trackerConfig.targetManagement.maxCenterJumpRatio = itr->second.as<float>();
+            if (trackerConfig.targetManagement.maxCenterJumpRatio <= 0.0f)
+            {
+                trackerConfig.targetManagement.maxCenterJumpRatio = 3.0f;
+                std::cerr << "Invalid maxCenterJumpRatio in config file, set to default 3.0" << std::endl;
+            }
+        }
+        else if (key == "maxScaleChangeRatio")
+        {
+            trackerConfig.targetManagement.maxScaleChangeRatio = itr->second.as<float>();
+            if (trackerConfig.targetManagement.maxScaleChangeRatio < 1.0f)
+            {
+                trackerConfig.targetManagement.maxScaleChangeRatio = 2.0f;
+                std::cerr << "Invalid maxScaleChangeRatio in config file, set to default 2.0" << std::endl;
+            }
+        }
+        else if (key == "maxAspectChangeRatio")
+        {
+            trackerConfig.targetManagement.maxAspectChangeRatio = itr->second.as<float>();
+            if (trackerConfig.targetManagement.maxAspectChangeRatio < 1.0f)
+            {
+                trackerConfig.targetManagement.maxAspectChangeRatio = 2.0f;
+                std::cerr << "Invalid maxAspectChangeRatio in config file, set to default 2.0" << std::endl;
+            }
+        }
+        else if (key == "requireDetectorEveryNFrames")
+        {
+            trackerConfig.targetManagement.requireDetectorEveryNFrames =
+                itr->second.as<uint32_t>();
+        }
+        else if (key == "maxUnverifiedFrames")
+        {
+            trackerConfig.targetManagement.maxUnverifiedFrames =
+                itr->second.as<uint32_t>();
+        }
+        else if (key == "targetClassId")
+        {
+            trackerConfig.targetManagement.targetClassId = itr->second.as<int>();
+        }
+        else if (key == "enableAppearanceCheck")
+        {
+            trackerConfig.targetManagement.enableAppearanceCheck =
+                itr->second.as<int>() != 0;
+        }
+        else if (key == "appearanceSimilarityThreshold")
+        {
+            trackerConfig.targetManagement.appearanceSimilarityThreshold =
+                itr->second.as<float>();
+            if (trackerConfig.targetManagement.appearanceSimilarityThreshold <
+                    -1.0f ||
+                trackerConfig.targetManagement.appearanceSimilarityThreshold >
+                    1.0f)
+            {
+                trackerConfig.targetManagement.appearanceSimilarityThreshold =
+                    0.25f;
+                std::cerr << "Invalid appearanceSimilarityThreshold in config file, set to default 0.25" << std::endl;
+            }
+        }
+        else if (key == "minPatchStdDev")
+        {
+            trackerConfig.targetManagement.minPatchStdDev = itr->second.as<float>();
+            if (trackerConfig.targetManagement.minPatchStdDev < 0.0f)
+            {
+                trackerConfig.targetManagement.minPatchStdDev = 5.0f;
+                std::cerr << "Invalid minPatchStdDev in config file, set to default 5.0" << std::endl;
+            }
+        }
+        else if (key == "minEdgeDensity")
+        {
+            trackerConfig.targetManagement.minEdgeDensity = itr->second.as<float>();
+            if (trackerConfig.targetManagement.minEdgeDensity < 0.0f ||
+                trackerConfig.targetManagement.minEdgeDensity > 1.0f)
+            {
+                trackerConfig.targetManagement.minEdgeDensity = 0.001f;
+                std::cerr << "Invalid minEdgeDensity in config file, set to default 0.001" << std::endl;
+            }
+        }
         else
         {
             std::cerr << "Unknown key in TargetManagement: " << key << std::endl;
         }
+    }
+    if (scoreThresholdSet && !lowScoreThresholdSet)
+    {
+        trackerConfig.targetManagement.lowScoreThreshold =
+            trackerConfig.targetManagement.scoreThreshold;
+    }
+    if (scoreThresholdSet && !highScoreThresholdSet)
+    {
+        trackerConfig.targetManagement.highScoreThreshold =
+            std::max(trackerConfig.targetManagement.scoreThreshold,
+                     trackerConfig.targetManagement.highScoreThreshold);
+    }
+    if (trackerConfig.targetManagement.highScoreThreshold <
+        trackerConfig.targetManagement.lowScoreThreshold)
+    {
+        trackerConfig.targetManagement.highScoreThreshold =
+            trackerConfig.targetManagement.lowScoreThreshold;
+        std::cerr << "highScoreThreshold is lower than lowScoreThreshold, align to lowScoreThreshold" << std::endl;
     }
 
     if (trackerConfig.modelName == MODEL_MIXFORMERV2)
@@ -348,6 +471,48 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
         {
             trackerConfig.nanotrack.instanceSize =
                 nanotrackNode["instance_size"].as<int>();
+        }
+
+        if (nanotrackNode["window_influence"])
+        {
+            trackerConfig.nanotrack.windowInfluence =
+                nanotrackNode["window_influence"].as<float>();
+            if (trackerConfig.nanotrack.windowInfluence < 0.0f ||
+                trackerConfig.nanotrack.windowInfluence > 1.0f)
+            {
+                trackerConfig.nanotrack.windowInfluence = -1.0f;
+                std::cerr << "Invalid window_influence in config file, use NanoTrack default" << std::endl;
+            }
+        }
+        if (nanotrackNode["penalty_k"])
+        {
+            trackerConfig.nanotrack.penaltyK =
+                nanotrackNode["penalty_k"].as<float>();
+            if (trackerConfig.nanotrack.penaltyK < 0.0f)
+            {
+                trackerConfig.nanotrack.penaltyK = -1.0f;
+                std::cerr << "Invalid penalty_k in config file, use NanoTrack default" << std::endl;
+            }
+        }
+        if (nanotrackNode["lr"])
+        {
+            trackerConfig.nanotrack.lr = nanotrackNode["lr"].as<float>();
+            if (trackerConfig.nanotrack.lr < 0.0f ||
+                trackerConfig.nanotrack.lr > 1.0f)
+            {
+                trackerConfig.nanotrack.lr = -1.0f;
+                std::cerr << "Invalid lr in config file, use NanoTrack default" << std::endl;
+            }
+        }
+        if (nanotrackNode["context_amount"])
+        {
+            trackerConfig.nanotrack.contextAmount =
+                nanotrackNode["context_amount"].as<float>();
+            if (trackerConfig.nanotrack.contextAmount <= 0.0f)
+            {
+                trackerConfig.nanotrack.contextAmount = -1.0f;
+                std::cerr << "Invalid context_amount in config file, use NanoTrack default" << std::endl;
+            }
         }
 
         if (trackerConfig.nanotrack.exemplarSize < 0)

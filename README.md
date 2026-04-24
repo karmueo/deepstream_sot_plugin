@@ -135,18 +135,30 @@ bash convert2trt.sh your_model.onnx output.engine fp16
 ```yaml
 BaseConfig:
   modelName: 2                 # 0=sutrack, 1=ostrack, 2=mixformer_v2, 3=nanotrack
-  enableTrackCenterStable: 1   # 是否启用跟踪中心稳定性判定
+  enableTrackCenterStable: 0   # 是否启用跟踪中心稳定性判定
   trackCenterStablePixelThreshold: 3
 
 TargetManagement:
   expandFactor: 1.0
   probationAge: 2
-  maxMiss: 10
+  maxMiss: 4
   scoreThreshold: 0.3
+  lowScoreThreshold: 0.45
+  highScoreThreshold: 0.65
   iouThreshold: 0.5
   trackBoxWidthThreshold: 0.3
   trackBoxHeightThreshold: 0.3
   maxTrackAge: 30
+  maxCenterJumpRatio: 3.0
+  maxScaleChangeRatio: 2.0
+  maxAspectChangeRatio: 2.0
+  requireDetectorEveryNFrames: 15
+  maxUnverifiedFrames: 15
+  targetClassId: 1
+  enableAppearanceCheck: 1
+  appearanceSimilarityThreshold: 0.25
+  minPatchStdDev: 5.0
+  minEdgeDensity: 0.001
 
 MixformerV2Config:
   modelFilePath: /abs/path/mixformerv2_online_base_fp16.engine
@@ -160,25 +172,45 @@ NanotrackConfig:
   nanotrack_search_backbone_engine: /abs/path/nanotrack_backbone_search_fp16.engine
   # nanotrack_exemplar_size: 127  # 可选，不设置则使用默认值
   # nanotrack_instance_size: 255  # 可选，不设置则使用默认值
+  window_influence: 0.50
+  penalty_k: 0.18
+  lr: 0.25
+  context_amount: 0.5
 ```
 
 字段含义：
 * BaseConfig.modelName：选择具体模型枚举（见第 2 节）。
-* enableTrackCenterStable：启用后，会统计跟踪中心位置波动，过滤稳定但可能错误的目标。
-* trackCenterStablePixelThreshold：中心像素标准差阈值，越小越严格。
+* enableTrackCenterStable：启用后，会统计跟踪中心位置波动，过滤长期停在非画面中心且未被检测框验证的静止目标。该项会触发 tracker reset 并更换 `object_id`，因此默认关闭；真实无人机悬停、云台随动或 `videorecognition` 需要连续历史帧时，不建议开启。
+* trackCenterStablePixelThreshold：中心像素标准差阈值，仅在 `enableTrackCenterStable=1` 且当前跟踪已有未验证帧时生效；标准差低于该值会判为疑似墙面污点/静止背景。越小越严格、越不容易触发。
 * TargetManagement.expandFactor：初始化 / 更新时对目标框进行放大裁剪的比例。
 * probationAge：达到该"年龄"后才认定为稳定跟踪（可避免一开始噪声）。
 * maxMiss：连续多少帧未成功更新则判定丢失。
 * scoreThreshold：模型输出分数低于该值可视为无效/低可信。
 * iouThreshold：当前预测与上一帧 / 检测框的匹配 IOU 下限。
 * trackBoxWidth/HeightThreshold：用于限制预测框与初始尺度差异的比例（防止尺度漂移）。
-* maxTrackAge：内部保存的历史长度 / 生命周期上限。
+* maxTrackAge：内部保存的历史长度，也是中心稳定过滤的统计窗口。`videorecognition` 默认需要 `model_clip_length * sampling-rate + 10` 帧连续同一 `object_id` 历史，当前默认约 170 帧；如果开启中心稳定过滤，该值过小会导致视频识别攒够帧前轨迹被重置。
+* lowScoreThreshold：NanoTrack 候选分数低于该值时直接拒绝，不提交 tracker 内部状态；调高会更快丢弃疑似墙面/天空误跟踪，但遮挡时更容易丢目标。
+* highScoreThreshold：候选分数达到该值后可不依赖检测框继续跟踪，但仍需通过运动/外观门控；调高更保守，调低更容易连续跟踪但误跟风险更高。
+* maxCenterJumpRatio：单帧中心最大跳变，计算方式为上一帧目标对角线乘以该系数；超过则拒绝候选，防止跳到远处污点或背景。
+* maxScaleChangeRatio：单帧面积最大变化比例，使用 `max(new_area/old_area, old_area/new_area)`；超过则拒绝候选，防止尺度漂移。
+* maxAspectChangeRatio：单帧宽高比最大变化比例，使用 `max(new_aspect/old_aspect, old_aspect/new_aspect)`；超过则拒绝候选。
+* requireDetectorEveryNFrames：启用检测验证窗口；设为 `0` 时不限制连续未验证输出，设为正数时配合 `maxUnverifiedFrames` 限制纯跟踪持续时间。
+* maxUnverifiedFrames：候选框连续未与检测框匹配的最大帧数；超过后拒绝输出，避免目标丢失后长时间跟墙面或天空。
+* targetClassId：初始化和检测验证只接受该类别；当前无人机类别为 `1`，设为 `-1` 表示不限制类别。
+* enableAppearanceCheck：启用外观一致性校验；候选未匹配检测框时，会比较初始目标 patch 与当前候选 patch 的颜色和纹理。
+* appearanceSimilarityThreshold：HSV 直方图相关性阈值，越高越要求颜色外观接近初始目标；过高可能拒绝光照变化下的真实目标。
+* minPatchStdDev：候选 patch 灰度标准差下限；低于该值通常表示天空等均匀背景，会被拒绝。
+* minEdgeDensity：候选 patch 边缘像素占比下限；低于该值表示纹理/边缘太少，常见于天空背景，会被拒绝。
 * MixformerV2Config.update_interval：模板在线更新的帧间隔。
 * MixformerV2Config.max_score_decay：最大历史分数的衰减系数（防止一直保持旧峰值）。
 * template_update_score_threshold：达到该分数且到达更新间隔才会刷新在线模板。
 * NanotrackConfig.nanotrack_head_engine：head 引擎文件路径。
 * NanotrackConfig.nanotrack_backbone_engine：backbone 引擎文件路径。
 * NanotrackConfig.nanotrack_search_backbone_engine：search backbone 引擎文件路径。
+* window_influence：汉宁窗影响系数，越大越偏向上一帧中心附近的响应点；调高可降低跳到远处相似背景的概率，但快速运动目标更易跟丢。
+* penalty_k：尺度/宽高比变化惩罚，越大越抑制形状突变；调高可减少框突然变大/变形，过高会降低适应目标尺度变化的能力。
+* lr：状态更新学习率，越小越慢更新中心和尺寸；调低可减少漂移累积，过低会导致快速运动或尺度变化时滞后。
+* context_amount：模板/搜索区域上下文比例，越大裁剪区域包含越多背景；过大易引入墙面/天空干扰，过小则目标运动快时可能出搜索框。
 
 ---
 ## 8. 在 DeepStream 中的使用示例

@@ -29,10 +29,22 @@ struct TARGET_MANAGEMENT
     uint16_t probationAge            = 5;     // 跟踪成功多少次后进入跟踪状态，默认5次
     uint16_t maxMiss                 = 10;    // 最大连续丢失次数，超过后认为跟踪失败，默认10次
     float    scoreThreshold          = 0.3f;  // 跟踪分数阈值，默认0.3
+    float    lowScoreThreshold       = 0.35f; // 低分立即拒绝阈值
+    float    highScoreThreshold      = 0.65f; // 高可信阈值，中间分数需要额外验证
     float    iouThreshold            = 0.5f;  // IOU阈值，默认0.5
     float    trackBoxWidthThreshold  = 0.3f;  // 跟踪框宽度阈值，默认0.3
     float    trackBoxHeightThreshold = 0.3f;  // 跟踪框高度阈值，默认0.3
     uint32_t maxTrackAge             = 30;    // 最大跟踪年龄，超过后认为跟踪失败，默认30
+    float    maxCenterJumpRatio      = 3.0f;  // 中心最大跳变，按上一帧目标对角线缩放
+    float    maxScaleChangeRatio     = 2.0f;  // 单帧尺度最大变化比例
+    float    maxAspectChangeRatio    = 2.0f;  // 单帧宽高比最大变化比例
+    uint32_t requireDetectorEveryNFrames = 15; // 连续未检测验证上限
+    uint32_t maxUnverifiedFrames     = 15;    // 连续未验证帧数上限
+    int      targetClassId           = 1;     // 目标类别，<0 表示不限制
+    bool     enableAppearanceCheck   = true;  // 是否启用外观一致性校验
+    float    appearanceSimilarityThreshold = 0.25f; // HSV 直方图相关性阈值
+    float    minPatchStdDev          = 5.0f;  // 过低说明候选区域过于均匀
+    float    minEdgeDensity          = 0.001f; // 候选区域最低边缘密度
 };
 
 struct MIXFORMERV2_CONFIG
@@ -62,6 +74,10 @@ struct NANOTRACK_CONFIG
     std::string    searchBackboneEngine;       // search backbone 引擎路径
     int            exemplarSize = 0;           // 模板尺寸（<=0 表示使用默认值）
     int            instanceSize = 0;           // 搜索尺寸（<=0 表示使用默认值）
+    float          windowInfluence = -1.f;     // 汉宁窗影响系数（<0 使用模型默认）
+    float          penaltyK = -1.f;            // 尺度/比例惩罚系数（<0 使用模型默认）
+    float          lr = -1.f;                  // 状态更新学习率（<0 使用模型默认）
+    float          contextAmount = -1.f;       // 上下文裁剪比例（<0 使用模型默认）
 };
 
 struct TRACKER_CONFIG
@@ -102,6 +118,30 @@ public:
     void updatePastFrameObjBatch(NvDsTargetMiscDataBatch *pastFrameObjBatch);
 
 private:
+    bool isTargetClass(int classId) const;
+    bool selectTargetDetection(const NvMOTObjToTrackList *detectObjList,
+                               const cv::Mat &img,
+                               const DrOBB *referenceBox,
+                               DrOBB &selected,
+                               uint32_t *matchedDetectId) const;
+    bool findMatchedDetection(const NvMOTObjToTrackList *detectObjList,
+                              const DrOBB &candidate,
+                              const DrOBB &prevBox,
+                              uint32_t *matchedDetectId) const;
+    bool reinitializeFromDetection(const cv::Mat &img,
+                                   const DrOBB &detectionBox);
+    bool isMotionReasonable(const DrOBB &candidate,
+                            const DrOBB &prevBox,
+                            const cv::Mat &img) const;
+    bool updateAppearanceReference(const cv::Mat &img, const DrOBB &bbox);
+    bool isAppearanceReasonable(const cv::Mat &img, const DrOBB &bbox) const;
+    bool computeAppearanceFeature(const cv::Mat &img,
+                                  const DrOBB &bbox,
+                                  cv::Mat &hist,
+                                  double &grayStdDev,
+                                  double &edgeDensity) const;
+    void resetTrackingState();
+
     bool is_tracked_;
     int64_t age_;
     int64_t trackId_;
@@ -117,4 +157,8 @@ private:
     uint32_t trackCenterStablePixelThreshold_;  // 跟踪中心位置稳定判断的像素阈值，单位像素
     TRACKER_CONFIG trackerConfig_;
     uint32_t confirmAgeThreshold_;
+    uint32_t unverifiedFrames_ = 0;
+    cv::Mat appearanceHist_;
+    double appearanceStdDev_ = 0.0;
+    double appearanceEdgeDensity_ = 0.0;
 };

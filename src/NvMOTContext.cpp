@@ -1,9 +1,16 @@
 #include "Tracker.h"
 #include <cuda_runtime.h>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <limits>
 #include <utility>
+
+static bool isSotDebugEnabled()
+{
+    const char *env = std::getenv("SOT_DEBUG");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+}
 
 static bool isValidTrackedObjList(const NvMOTTrackedObjList *trackedObjList)
 {
@@ -166,8 +173,24 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         NvMOTTrackedObj *trackedObj = &trackedObjs[0];
 
         // 如果跟踪上了，给NvMOTTrackedObj赋值
-        if (tracker_->isTracked() &&
-            trackInfo.age > trackerConfig_.targetManagement.probationAge)
+        const bool outputTrack =
+            tracker_->isTracked() &&
+            trackInfo.age >= trackerConfig_.targetManagement.probationAge &&
+            trackInfo.bbox.box.w > 0.f && trackInfo.bbox.box.h > 0.f;
+        if (isSotDebugEnabled())
+        {
+            std::cerr << "[SOT] frame " << frame->frameNum
+                      << " NvMOT output=" << outputTrack
+                      << " isTracked=" << tracker_->isTracked()
+                      << " age=" << trackInfo.age
+                      << " probation="
+                      << trackerConfig_.targetManagement.probationAge
+                      << " detections=" << frame->objectsIn.numFilled
+                      << " matchedDetectId=" << matchedDetectId
+                      << " score=" << trackInfo.bbox.score
+                      << std::endl;
+        }
+        if (outputTrack)
         {
             // 按 expandFactor 膨胀
             float new_w = trackInfo.bbox.box.w *

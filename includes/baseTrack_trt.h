@@ -55,7 +55,7 @@ class BaseTrackTRT
 {
 public: 
     BaseTrackTRT(const std::string &engine_name);
-    ~BaseTrackTRT();
+    virtual ~BaseTrackTRT();
 
     void deserialize_engine(const std::string &engine_name);
 
