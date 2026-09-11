@@ -41,24 +41,24 @@ void SuTrackTRT::initIOBuffer()
     this->input_template = new float[input_template_size];
     this->input_search = new float[input_search_size];
     this->input_template_anno = new float[input_template_anno_size];
-    CHECK(cudaMalloc(&this->dev_input_template, this->input_template_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_input_search, this->input_search_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_input_template_anno, this->input_template_anno_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_template, this->input_template_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_search, this->input_search_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_template_anno, this->input_template_anno_size * sizeof(float)));
 
     // OUTPUT
     this->output_pred_boxes = new float[this->output_pred_boxes_size];
     this->output_score = new float[this->output_score_size];
-    CHECK(cudaMalloc(&this->dev_output_pred_boxes, this->output_pred_boxes_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_output_score, this->output_score_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_pred_boxes, this->output_pred_boxes_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_score, this->output_score_size * sizeof(float)));
 }
 
 void SuTrackTRT::destroyIOBuffer()
 {
-    CHECK(cudaFree(this->dev_input_template));
-    CHECK(cudaFree(this->dev_input_search));
-    CHECK(cudaFree(this->dev_input_template_anno));
-    CHECK(cudaFree(this->dev_output_pred_boxes));
-    CHECK(cudaFree(this->dev_output_score));
+    (void)cudaFree(this->dev_input_template);
+    (void)cudaFree(this->dev_input_search);
+    (void)cudaFree(this->dev_input_template_anno);
+    (void)cudaFree(this->dev_output_pred_boxes);
+    (void)cudaFree(this->dev_output_score);
 }
 
 int SuTrackTRT::init(const cv::Mat &img, DrOBB bbox)
@@ -133,19 +133,19 @@ void SuTrackTRT::infer()
     // auto start = std::chrono::high_resolution_clock::now();
 
     // DMA input batch  data to device, infer on the batch asynchronously,  and DMA output back to host
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->dev_input_template,
         this->input_template,
         this->input_template_size * sizeof(float),
         cudaMemcpyHostToDevice,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->dev_input_search,
         this->input_search,
         this->input_search_size * sizeof(float),
         cudaMemcpyHostToDevice,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->dev_input_template_anno,
         this->input_template_anno,
         this->input_template_anno_size * sizeof(float),
@@ -159,22 +159,23 @@ void SuTrackTRT::infer()
     context->setTensorAddress(this->output_1, this->dev_output_score);
 
     // inference
-    this->context->enqueueV3(this->stream);
+    if (!this->context->enqueueV3(this->stream))
+        throw std::runtime_error("SuTrack inference enqueue failed");
 
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->output_pred_boxes,
         this->dev_output_pred_boxes,
         this->output_pred_boxes_size * sizeof(float),
         cudaMemcpyDeviceToHost,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->output_score,
         this->dev_output_score,
         this->output_score_size * sizeof(float),
         cudaMemcpyDeviceToHost,
         this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
 
     auto end = std::chrono::high_resolution_clock::now();
     // double duration_ms = std::chrono::duration<double, std::milli>(end - start).count();

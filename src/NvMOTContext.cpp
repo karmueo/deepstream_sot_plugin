@@ -1,7 +1,10 @@
 #include "Tracker.h"
+#include <algorithm>
+#include <cctype>
 #include <cuda_runtime.h>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <utility>
@@ -49,16 +52,8 @@ static NvMOTObjToTrack *extractMatchedDetection(NvMOTFrame                *frame
     if (matchedDetectId != std::numeric_limits<uint32_t>::max() &&
         matchedDetectId < objectsIn.numFilled)
     {
-        if (matchedDetectId != 0)
-        {
-            std::swap(objectsIn.list[0], objectsIn.list[matchedDetectId]);
-        }
-
-        objectsIn.numFilled = 1;
-        return &objectsIn.list[0];
+        return &objectsIn.list[matchedDetectId];
     }
-
-    objectsIn.numFilled = 0;
     return nullptr;
 }
 
@@ -74,7 +69,14 @@ NvMOTContext::NvMOTContext(const NvMOTConfig   &configIn,
     {
         std::cerr << "Failed to parse custom config file: "
                   << configIn.customConfigFilePath << std::endl;
+        configResponse.summaryStatus = NvMOTConfigStatus_Error;
+        configResponse.customConfigStatus = NvMOTConfigStatus_Error;
+        return;
     }
+    configResponse.computeStatus = NvMOTConfigStatus_OK;
+    configResponse.transformBatchStatus = NvMOTConfigStatus_OK;
+    configResponse.miscConfigStatus = NvMOTConfigStatus_OK;
+    configResponse.customConfigStatus = NvMOTConfigStatus_OK;
 
     if (!trackerConfig_.mixformerV2.modelFilePath.empty())
     {
@@ -85,8 +87,16 @@ NvMOTContext::NvMOTContext(const NvMOTConfig   &configIn,
                       << trackerConfig_.mixformerV2.modelFilePath << "." << std::endl;
         }
     }
-    tracker_ = std::make_shared<DeepTracker>(trackerConfig_.mixformerV2.modelFilePath,
-                                             trackerConfig_);
+    const char *debug = std::getenv("SOT_DEBUG");
+    debugLogging_ = debug != nullptr && debug[0] != '\0' && debug[0] != '0';
+    const char *gstDebug = std::getenv("GST_DEBUG");
+    if (!debugLogging_ && gstDebug != nullptr)
+    {
+        const char *sotLevel = std::strstr(gstDebug, "sot:");
+        debugLogging_ = (sotLevel != nullptr && std::atoi(sotLevel + 4) >= 4) ||
+                        (std::isdigit(static_cast<unsigned char>(gstDebug[0])) &&
+                         std::atoi(gstDebug) >= 4);
+    }
 }
 
 NvMOTContext::~NvMOTContext() {}
@@ -95,36 +105,50 @@ NvMOTStatus
 NvMOTContext::processFrame(const NvMOTProcessParams *params,
                            NvMOTTrackedObjBatch     *pTrackedObjectsBatch)
 {
-    cv::Mat in_mat;
-
-    if (!params || params->numFrames <= 0)
+    if (!params || !pTrackedObjectsBatch || params->numFrames == 0)
     {
-        return NvMOTStatus_OK;
+        return params && pTrackedObjectsBatch ? NvMOTStatus_OK : NvMOTStatus_Invalid_Path;
     }
+    if (!params->frameList || !pTrackedObjectsBatch->list)
+        return NvMOTStatus_Error;
 
-    for (uint streamIdx = 0; streamIdx < pTrackedObjectsBatch->numFilled;
-         streamIdx++)
+    const uint32_t resetCount = std::min(params->numFrames,
+                                         pTrackedObjectsBatch->numAllocated);
+    for (uint32_t i = 0; i < resetCount; ++i)
     {
+        NvMOTTrackedObjList &output = pTrackedObjectsBatch->list[i];
+        output.streamID = params->frameList[i].streamID;
+        output.frameNum = params->frameList[i].frameNum;
+        output.valid = false;
+        output.numFilled = 0;
+    }
+    if (pTrackedObjectsBatch->numAllocated < params->numFrames)
+        return NvMOTStatus_Error;
+
+    NvMOTStatus batchStatus = NvMOTStatus_OK;
+    for (uint streamIdx = 0; streamIdx < params->numFrames; streamIdx++)
+    {
+        NvMOTFrame *frame = &params->frameList[streamIdx];
         NvMOTTrackedObjList *trackedObjList =
             &pTrackedObjectsBatch->list[streamIdx];
-        if (isValidTrackedObjList(trackedObjList) == false)
+        trackedObjList->streamID = frame->streamID;
+        trackedObjList->frameNum = frame->frameNum;
+        trackedObjList->valid = false;
+        trackedObjList->numFilled = 0;
+        if (isValidTrackedObjList(trackedObjList) == false ||
+            trackedObjList->numAllocated < 1)
         {
+            batchStatus = NvMOTStatus_Error;
             continue;
         }
 
-        NvMOTFrame *frame = &params->frameList[streamIdx];
-
-        if (frame->bufferList[0] == nullptr)
+        if (!frame->bufferList || frame->numBuffers < 1 ||
+            frame->bufferList[0] == nullptr)
         {
-            std::cout << "frame->bufferList[0] is nullptr" << std::endl;
+            std::cerr << "SOT: missing transform buffer for stream "
+                      << frame->streamID << std::endl;
+            batchStatus = NvMOTStatus_Error;
             continue;
-        }
-
-        if (trackedObjList->numAllocated != 1)
-        {
-            // Reallocate memory space
-            delete[] trackedObjList->list;
-            trackedObjList->list = new NvMOTTrackedObj[1];
         }
 
         NvBufSurfaceParams *bufferParams = frame->bufferList[0];
@@ -135,18 +159,48 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
         if (rgbaPtr == nullptr)
         {
             std::cerr << "Invalid RGBA buffer pointer (dataPtr/mappedAddr is null)" << std::endl;
+            batchStatus = NvMOTStatus_Error;
             continue;
         }
         cv::Mat rgbaFrame(bufferParams->height, bufferParams->width, CV_8UC4,
                           rgbaPtr, bufferParams->pitch);
-        cv::Mat bgrFrame;
-        // 跟踪器输入为 3 通道 BGR，DeepStream 输出为 RGBA，需要转换
-        cv::cvtColor(rgbaFrame, bgrFrame, cv::COLOR_RGBA2BGR);
+
+        auto trackerIt = trackers_.find(frame->streamID);
+        if (trackerIt == trackers_.end())
+        {
+            try
+            {
+                auto tracker = std::make_unique<DeepTracker>(
+                    trackerConfig_.mixformerV2.modelFilePath, trackerConfig_);
+                trackerIt = trackers_.emplace(frame->streamID,
+                                               std::move(tracker)).first;
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << "SOT: unable to create tracker for stream "
+                          << frame->streamID << ": " << e.what() << std::endl;
+                batchStatus = NvMOTStatus_Error;
+                continue;
+            }
+        }
+        DeepTracker *tracker = trackerIt->second.get();
 
         TrackInfo trackInfo;
         uint32_t  matchedDetectId = std::numeric_limits<uint32_t>::max();
-        trackInfo = tracker_->update(bgrFrame, &frame->objectsIn,
-                                     frame->frameNum, &matchedDetectId);
+        try
+        {
+            trackInfo = tracker->update(rgbaFrame, &frame->objectsIn,
+                                        frame->frameNum, &matchedDetectId);
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "SOT: tracker failed for stream " << frame->streamID
+                      << ": " << e.what() << std::endl;
+            trackers_.erase(frame->streamID);
+            fpsState_.erase(frame->streamID);
+            batchStatus = NvMOTStatus_Error;
+            continue;
+        }
 
         // 计算并显示FPS（每3秒更新一次）
         auto now = std::chrono::steady_clock::now();
@@ -174,14 +228,14 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
 
         // 如果跟踪上了，给NvMOTTrackedObj赋值
         const bool outputTrack =
-            tracker_->isTracked() &&
+            tracker->isTracked() &&
             trackInfo.age >= trackerConfig_.targetManagement.probationAge &&
             trackInfo.bbox.box.w > 0.f && trackInfo.bbox.box.h > 0.f;
         if (isSotDebugEnabled())
         {
             std::cerr << "[SOT] frame " << frame->frameNum
                       << " NvMOT output=" << outputTrack
-                      << " isTracked=" << tracker_->isTracked()
+                      << " isTracked=" << tracker->isTracked()
                       << " age=" << trackInfo.age
                       << " probation="
                       << trackerConfig_.targetManagement.probationAge
@@ -232,9 +286,7 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
             // trackedObjList->streamID = frame->streamID;
             trackedObjList->frameNum = frame->frameNum;
             trackedObjList->valid = true;
-            trackedObjList->list = trackedObjs;
             trackedObjList->numFilled = 1;
-            trackedObjList->numAllocated = 1;
         }
         else
         {
@@ -243,19 +295,31 @@ NvMOTContext::processFrame(const NvMOTProcessParams *params,
             trackedObjList->frameNum = frame->frameNum;
             trackedObjList->numFilled = 0;
             trackedObjList->valid = false;
-            trackedObjList->numAllocated = 1;
             if (trackedObj != nullptr)
             {
                 trackedObj->associatedObjectIn = nullptr;
             }
-            if (frame->objectsIn.list != nullptr)
-            {
-                frame->objectsIn.numFilled = 0;
-            }
+        }
+
+        if (debugLogging_ && (frame->frameNum % 30 == 0 ||
+                              trackInfo.initialized || trackInfo.reset))
+        {
+            std::cout << "[SOT] stream=" << frame->streamID
+                      << " frame=" << frame->frameNum
+                      << " id=" << trackInfo.trackId
+                      << " age=" << trackInfo.age
+                      << " miss=" << trackInfo.miss
+                      << " bbox=" << trackInfo.bbox.box.x0 << ','
+                      << trackInfo.bbox.box.y0 << ',' << trackInfo.bbox.box.w
+                      << ',' << trackInfo.bbox.box.h
+                      << " score=" << trackInfo.bbox.score
+                      << " init=" << trackInfo.initialized
+                      << " reset=" << trackInfo.reset
+                      << " tracked=" << tracker->isTracked() << std::endl;
         }
     }
 
-    return NvMOTStatus_OK;
+    return batchStatus;
 }
 
 NvMOTStatus
@@ -264,27 +328,24 @@ NvMOTContext::retrieveMiscData(const NvMOTProcessParams *params,
 {
     (void)params;
     (void)pTrackerMiscData;
-    /* std::set<NvMOTStreamId> videoStreamIdList;
-    for (NvMOTStreamId streamInd = 0; streamInd < params->numFrames;
-    streamInd++)
-    {
-        videoStreamIdList.insert(params->frameList[streamInd].streamID);
-    }
-
-    for (NvMOTStreamId streamInd = 0; streamInd < params->numFrames;
-    streamInd++)
-    {
-        if (pTrackerMiscData && pTrackerMiscData->pPastFrameObjBatch)
-        {
-            tracker_->updatePastFrameObjBatch(pTrackerMiscData->pPastFrameObjBatch);
-        }
-    } */
-
     return NvMOTStatus_OK;
 }
 
 NvMOTStatus NvMOTContext::removeStream(const NvMOTStreamId streamIdMask)
 {
-    (void)streamIdMask;
+    for (auto it = trackers_.begin(); it != trackers_.end();)
+    {
+        if ((it->first & streamIdMask) == streamIdMask)
+            it = trackers_.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = fpsState_.begin(); it != fpsState_.end();)
+    {
+        if ((it->first & streamIdMask) == streamIdMask)
+            it = fpsState_.erase(it);
+        else
+            ++it;
+    }
     return NvMOTStatus_OK;
 }

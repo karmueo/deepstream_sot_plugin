@@ -32,6 +32,8 @@ class NanotrackTRT : public BaseTrackTRT
 
     // 执行一次跟踪（输入：当前帧图像，输出：当前帧目标框）
     const DrOBB &track(const cv::Mat &img) override;
+    int initRgba(const cv::Mat &rgba, DrOBB bbox) override;
+    const DrOBB &trackRgba(const cv::Mat &rgba) override;
 
     // 只计算候选框，不提交内部状态（输入：当前帧图像，输出：候选目标框）
     const DrOBB &trackCandidate(const cv::Mat &img);
@@ -102,6 +104,12 @@ class NanotrackTRT : public BaseTrackTRT
              const std::vector<float> &xf, const std::vector<int64_t> &xf_shape,
              std::vector<int64_t> &cls_shape, std::vector<int64_t> &loc_shape);
 
+    void run_template_backbone_device(const std::vector<float> &input);
+    std::pair<std::vector<float>, std::vector<float>>
+    run_split_device(const std::vector<float> &search,
+                     std::vector<int64_t> &cls_shape,
+                     std::vector<int64_t> &loc_shape);
+
     // 构建汉宁窗（输入：score 尺寸，输出：二维窗口）
     std::vector<float> build_window(int size);
 
@@ -131,11 +139,15 @@ class NanotrackTRT : public BaseTrackTRT
     // 边界框裁剪（输入：中心与尺寸/图像尺寸，输出：裁剪后参数）
     std::array<float, 4> bbox_clip(float cx, float cy, float width,
                                    float height, int rows, int cols) const;
+    int initImpl(const cv::Mat &img, DrOBB bbox);
+    const DrOBB &trackImpl(const cv::Mat &img);
 
   private:
     TrackerConfig cfg_;
     // 当前模式（true=合并模型，false=分段模型）
     bool use_merge_ = false;
+    bool direct_split_features_ = false;
+    bool template_ready_ = false;
     std::pair<int, int> head_template_hw_{-1, -1};
     std::pair<int, int> head_search_hw_{-1, -1};
     std::pair<int, int> template_input_hw_{-1, -1};

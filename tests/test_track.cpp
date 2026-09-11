@@ -1,11 +1,17 @@
+#if __has_include(<catch2/catch_all.hpp>)
 #include <catch2/catch_all.hpp>
+#else
+#include <catch2/catch.hpp>
+#endif
 
 #include "nanotrack_trt.h"
 #include "mixformerv2_trt.h"
+#include "Tracker.h"
 
 #include <opencv2/opencv.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -184,6 +190,92 @@ TEST_CASE("NanotrackTRT keeps stable bbox on identical frames")
     }
 }
 
+TEST_CASE("NvMOTContext preserves client-owned batch and input lists")
+{
+    std::string config_path =
+        std::string(TRACK_TEST_REPO_ROOT) + "/config_sot.yml";
+    NvMOTConfig config{};
+    config.maxStreams = 2;
+    config.customConfigFilePath = &config_path[0];
+    config.customConfigFilePathSize =
+        static_cast<uint16_t>(config_path.size() + 1);
+    NvMOTConfigResponse response{};
+    NvMOTContext context(config, response);
+    REQUIRE(response.summaryStatus == NvMOTConfigStatus_OK);
+
+    cv::Mat bgr = cv::imread(
+        std::string(TRACK_TEST_REPO_ROOT) + "/tests/test_image.jpg",
+        cv::IMREAD_COLOR);
+    REQUIRE(!bgr.empty());
+    cv::Mat rgba;
+    cv::cvtColor(bgr, rgba, cv::COLOR_BGR2RGBA);
+
+    NvBufSurfaceParams surface{};
+    surface.width = static_cast<uint32_t>(rgba.cols);
+    surface.height = static_cast<uint32_t>(rgba.rows);
+    surface.pitch = static_cast<uint32_t>(rgba.step);
+    surface.dataPtr = rgba.data;
+    NvBufSurfaceParams *buffer_list[] = {&surface};
+
+    NvMOTObjToTrack detections[2]{};
+    detections[0].classId = 1;
+    detections[0].bbox = {850.f, 500.f, 100.f, 80.f};
+    detections[0].confidence = 0.9f;
+    detections[1] = detections[0];
+    detections[1].bbox.x = 400.f;
+
+    NvMOTFrame frames[2]{};
+    for (uint32_t i = 0; i < 2; ++i)
+    {
+        frames[i].streamID = static_cast<NvMOTStreamId>(i) << 32;
+        frames[i].frameNum = 1;
+        frames[i].numBuffers = 1;
+        frames[i].bufferList = buffer_list;
+        frames[i].objectsIn.list = &detections[i];
+        frames[i].objectsIn.numAllocated = 1;
+        frames[i].objectsIn.numFilled = 1;
+    }
+    const NvMOTObjToTrack input_copy[2] = {detections[0], detections[1]};
+
+    NvMOTTrackedObj output_slots[2]{};
+    NvMOTTrackedObjList output_lists[2]{};
+    for (uint32_t i = 0; i < 2; ++i)
+    {
+        output_lists[i].list = &output_slots[i];
+        output_lists[i].numAllocated = 1;
+        output_lists[i].numFilled = 1;
+        output_lists[i].valid = true;
+    }
+    NvMOTTrackedObjBatch output_batch{};
+    output_batch.list = output_lists;
+    output_batch.numAllocated = 2;
+    output_batch.numFilled = 2;
+    NvMOTProcessParams params{2, frames};
+
+    NvMOTTrackedObjList *const original_batch_list = output_batch.list;
+    NvMOTTrackedObj *const original_stream0_list = output_lists[0].list;
+    NvMOTTrackedObj *const original_stream1_list = output_lists[1].list;
+    REQUIRE(context.processFrame(&params, &output_batch) == NvMOTStatus_OK);
+    REQUIRE(output_batch.list == original_batch_list);
+    REQUIRE(output_lists[0].list == original_stream0_list);
+    REQUIRE(output_lists[1].list == original_stream1_list);
+    REQUIRE(output_lists[0].numAllocated == 1);
+    REQUIRE(output_lists[1].numAllocated == 1);
+    REQUIRE(output_lists[0].streamID == frames[0].streamID);
+    REQUIRE(output_lists[1].streamID == frames[1].streamID);
+    REQUIRE(output_lists[0].numFilled == 0);
+    REQUIRE(output_lists[1].numFilled == 0);
+    REQUIRE(std::memcmp(detections, input_copy, sizeof(detections)) == 0);
+
+    output_lists[0].valid = true;
+    output_lists[0].numFilled = 1;
+    output_batch.numAllocated = 1;
+    REQUIRE(context.processFrame(&params, &output_batch) == NvMOTStatus_Error);
+    REQUIRE_FALSE(output_lists[0].valid);
+    REQUIRE(output_lists[0].numFilled == 0);
+    REQUIRE(context.removeStream(0) == NvMOTStatus_OK);
+}
+
 TEST_CASE("MixformerV2TRT keeps stable bbox on identical frames")
 {
     const char *env_path = std::getenv("TRACK_TEST_CONFIG");
@@ -250,6 +342,13 @@ TEST_CASE("MixformerV2TRT keeps stable bbox on identical frames")
     const std::string base_dir = dirName(config_path);
     image_path = resolvePath(base_dir, image_path);
     engine_path = resolvePath(base_dir, engine_path);
+
+    if (!fileExists(engine_path))
+    {
+        WARN("MixformerV2 engine is unavailable; skipping optional model test: "
+             << engine_path);
+        return;
+    }
 
     cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
     REQUIRE(!img.empty());

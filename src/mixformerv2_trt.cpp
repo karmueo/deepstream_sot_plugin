@@ -129,18 +129,18 @@ void MixformerV2TRT::initIOBuffer()
     this->input_template = new float[this->input_template_size];
     this->input_online_template = new float[this->input_online_template_size];
     this->input_search = new float[this->input_search_size];
-    CHECK(cudaMalloc(&this->dev_input_template,
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_template,
                      this->input_template_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_input_online_template,
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_online_template,
                      this->input_online_template_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_input_search,
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_search,
                      this->input_search_size * sizeof(float)));
 
     this->output_pred_boxes = new float[this->output_pred_boxes_size];
     this->output_pred_scores = new float[this->output_pred_scores_size];
-    CHECK(cudaMalloc(&this->dev_output_pred_boxes,
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_pred_boxes,
                      this->output_pred_boxes_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_output_pred_scores,
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_pred_scores,
                      this->output_pred_scores_size * sizeof(float)));
 }
 
@@ -148,27 +148,27 @@ void MixformerV2TRT::destroyIOBuffer()
 {
     if (this->dev_input_template != nullptr)
     {
-        CHECK(cudaFree(this->dev_input_template));
+        (void)cudaFree(this->dev_input_template);
         this->dev_input_template = nullptr;
     }
     if (this->dev_input_online_template != nullptr)
     {
-        CHECK(cudaFree(this->dev_input_online_template));
+        (void)cudaFree(this->dev_input_online_template);
         this->dev_input_online_template = nullptr;
     }
     if (this->dev_input_search != nullptr)
     {
-        CHECK(cudaFree(this->dev_input_search));
+        (void)cudaFree(this->dev_input_search);
         this->dev_input_search = nullptr;
     }
     if (this->dev_output_pred_boxes != nullptr)
     {
-        CHECK(cudaFree(this->dev_output_pred_boxes));
+        (void)cudaFree(this->dev_output_pred_boxes);
         this->dev_output_pred_boxes = nullptr;
     }
     if (this->dev_output_pred_scores != nullptr)
     {
-        CHECK(cudaFree(this->dev_output_pred_scores));
+        (void)cudaFree(this->dev_output_pred_scores);
         this->dev_output_pred_scores = nullptr;
     }
 }
@@ -297,16 +297,16 @@ const DrOBB &MixformerV2TRT::track(const cv::Mat &img)
 
 void MixformerV2TRT::infer()
 {
-    CHECK(cudaMemcpyAsync(this->dev_input_template, this->input_template,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_input_template, this->input_template,
                           this->input_template_size * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
-    CHECK(cudaMemcpyAsync(this->dev_input_online_template,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_input_online_template,
                           this->input_online_template,
                           this->input_online_template_size * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
-    CHECK(cudaMemcpyAsync(this->dev_input_search, this->input_search,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_input_search, this->input_search,
                           this->input_search_size * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
@@ -321,16 +321,17 @@ void MixformerV2TRT::infer()
     this->context->setTensorAddress(this->output_scores_name,
                                     this->dev_output_pred_scores);
 
-    this->context->enqueueV3(this->stream);
+    if (!this->context->enqueueV3(this->stream))
+        throw std::runtime_error("MixFormerV2 inference enqueue failed");
 
-    CHECK(cudaMemcpyAsync(this->output_pred_boxes, this->dev_output_pred_boxes,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->output_pred_boxes, this->dev_output_pred_boxes,
                           this->output_pred_boxes_size * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    CHECK(cudaMemcpyAsync(this->output_pred_scores,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->output_pred_scores,
                           this->dev_output_pred_scores,
                           this->output_pred_scores_size * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
 }
