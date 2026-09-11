@@ -1,4 +1,5 @@
 #include "nanotrack_trt.h"
+#include "nvtx_scope.h"
 
 #include <algorithm>
 #include <cassert>
@@ -181,12 +182,12 @@ void NanotrackTRT::initIOBuffer()
 
         if (this->backbone_input_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_backbone_input_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_backbone_input_,
                              this->backbone_input_size_ * sizeof(float)));
         }
         if (this->backbone_output_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_backbone_output_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_backbone_output_,
                              this->backbone_output_size_ * sizeof(float)));
         }
 
@@ -226,12 +227,12 @@ void NanotrackTRT::initIOBuffer()
 
             if (this->search_input_size_ > 0)
             {
-                CHECK(cudaMalloc(&this->dev_search_input_,
+                SOT_CUDA_CHECK(cudaMalloc(&this->dev_search_input_,
                                  this->search_input_size_ * sizeof(float)));
             }
             if (this->search_output_size_ > 0)
             {
-                CHECK(cudaMalloc(&this->dev_search_output_,
+                SOT_CUDA_CHECK(cudaMalloc(&this->dev_search_output_,
                                  this->search_output_size_ * sizeof(float)));
             }
 
@@ -253,12 +254,12 @@ void NanotrackTRT::initIOBuffer()
 
             if (this->search_input_size_ > 0)
             {
-                CHECK(cudaMalloc(&this->dev_search_input_,
+                SOT_CUDA_CHECK(cudaMalloc(&this->dev_search_input_,
                                  this->search_input_size_ * sizeof(float)));
             }
             if (this->search_output_size_ > 0)
             {
-                CHECK(cudaMalloc(&this->dev_search_output_,
+                SOT_CUDA_CHECK(cudaMalloc(&this->dev_search_output_,
                                  this->search_output_size_ * sizeof(float)));
             }
 
@@ -343,24 +344,34 @@ void NanotrackTRT::initIOBuffer()
             volume(this->engine->getTensorShape(
                 this->head_output_loc_name_.c_str()));
 
+        this->direct_split_features_ =
+            this->backbone_output_size_ == this->head_input_z_size_ &&
+            this->search_output_size_ == this->head_input_x_size_ &&
+            this->backbone_output_shape_.size() >= 4 &&
+            this->search_output_shape_.size() >= 4 &&
+            this->backbone_output_shape_[2] == this->head_template_hw_.first &&
+            this->backbone_output_shape_[3] == this->head_template_hw_.second &&
+            this->search_output_shape_[2] == this->head_search_hw_.first &&
+            this->search_output_shape_[3] == this->head_search_hw_.second;
+
         if (this->head_input_z_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_head_input_z_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_head_input_z_,
                              this->head_input_z_size_ * sizeof(float)));
         }
         if (this->head_input_x_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_head_input_x_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_head_input_x_,
                              this->head_input_x_size_ * sizeof(float)));
         }
         if (this->head_output_cls_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_head_output_cls_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_head_output_cls_,
                              this->head_output_cls_size_ * sizeof(float)));
         }
         if (this->head_output_loc_size_ > 0)
         {
-            CHECK(cudaMalloc(&this->dev_head_output_loc_,
+            SOT_CUDA_CHECK(cudaMalloc(&this->dev_head_output_loc_,
                              this->head_output_loc_size_ * sizeof(float)));
         }
 
@@ -475,22 +486,22 @@ void NanotrackTRT::initIOBuffer()
 
     if (this->merge_input_z_size_ > 0)
     {
-        CHECK(cudaMalloc(&this->dev_merge_input_z_,
+        SOT_CUDA_CHECK(cudaMalloc(&this->dev_merge_input_z_,
                          this->merge_input_z_size_ * sizeof(float)));
     }
     if (this->merge_input_x_size_ > 0)
     {
-        CHECK(cudaMalloc(&this->dev_merge_input_x_,
+        SOT_CUDA_CHECK(cudaMalloc(&this->dev_merge_input_x_,
                          this->merge_input_x_size_ * sizeof(float)));
     }
     if (this->merge_output_cls_size_ > 0)
     {
-        CHECK(cudaMalloc(&this->dev_merge_output_cls_,
+        SOT_CUDA_CHECK(cudaMalloc(&this->dev_merge_output_cls_,
                          this->merge_output_cls_size_ * sizeof(float)));
     }
     if (this->merge_output_loc_size_ > 0)
     {
-        CHECK(cudaMalloc(&this->dev_merge_output_loc_,
+        SOT_CUDA_CHECK(cudaMalloc(&this->dev_merge_output_loc_,
                          this->merge_output_loc_size_ * sizeof(float)));
     }
 
@@ -510,42 +521,42 @@ void NanotrackTRT::destroyIOBuffer()
     {
         if (this->dev_backbone_input_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_backbone_input_));
+            (void)cudaFree(this->dev_backbone_input_);
             this->dev_backbone_input_ = nullptr;
         }
         if (this->dev_backbone_output_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_backbone_output_));
+            (void)cudaFree(this->dev_backbone_output_);
             this->dev_backbone_output_ = nullptr;
         }
         if (this->dev_search_input_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_search_input_));
+            (void)cudaFree(this->dev_search_input_);
             this->dev_search_input_ = nullptr;
         }
         if (this->dev_search_output_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_search_output_));
+            (void)cudaFree(this->dev_search_output_);
             this->dev_search_output_ = nullptr;
         }
         if (this->dev_head_input_z_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_head_input_z_));
+            (void)cudaFree(this->dev_head_input_z_);
             this->dev_head_input_z_ = nullptr;
         }
         if (this->dev_head_input_x_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_head_input_x_));
+            (void)cudaFree(this->dev_head_input_x_);
             this->dev_head_input_x_ = nullptr;
         }
         if (this->dev_head_output_cls_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_head_output_cls_));
+            (void)cudaFree(this->dev_head_output_cls_);
             this->dev_head_output_cls_ = nullptr;
         }
         if (this->dev_head_output_loc_ != nullptr)
         {
-            CHECK(cudaFree(this->dev_head_output_loc_));
+            (void)cudaFree(this->dev_head_output_loc_);
             this->dev_head_output_loc_ = nullptr;
         }
         return;
@@ -553,27 +564,41 @@ void NanotrackTRT::destroyIOBuffer()
 
     if (this->dev_merge_input_z_ != nullptr)
     {
-        CHECK(cudaFree(this->dev_merge_input_z_));
+        (void)cudaFree(this->dev_merge_input_z_);
         this->dev_merge_input_z_ = nullptr;
     }
     if (this->dev_merge_input_x_ != nullptr)
     {
-        CHECK(cudaFree(this->dev_merge_input_x_));
+        (void)cudaFree(this->dev_merge_input_x_);
         this->dev_merge_input_x_ = nullptr;
     }
     if (this->dev_merge_output_cls_ != nullptr)
     {
-        CHECK(cudaFree(this->dev_merge_output_cls_));
+        (void)cudaFree(this->dev_merge_output_cls_);
         this->dev_merge_output_cls_ = nullptr;
     }
     if (this->dev_merge_output_loc_ != nullptr)
     {
-        CHECK(cudaFree(this->dev_merge_output_loc_));
+        (void)cudaFree(this->dev_merge_output_loc_);
         this->dev_merge_output_loc_ = nullptr;
     }
 }
 
 int NanotrackTRT::init(const cv::Mat &img, DrOBB bbox)
+{
+    if (img.channels() != 3)
+        return -1;
+    return initImpl(img, bbox);
+}
+
+int NanotrackTRT::initRgba(const cv::Mat &rgba, DrOBB bbox)
+{
+    if (rgba.channels() != 4)
+        return -1;
+    return initImpl(rgba, bbox);
+}
+
+int NanotrackTRT::initImpl(const cv::Mat &img, DrOBB bbox)
 {
     if (img.empty())
     {
@@ -624,9 +649,18 @@ int NanotrackTRT::init(const cv::Mat &img, DrOBB bbox)
             return -1;
         }
 
-        this->zf_ = run_backbone(z, this->zf_shape_);
-        this->zf_ = align_feature(this->zf_, this->zf_shape_,
-                                  this->head_template_hw_, this->zf_shape_);
+        if (this->direct_split_features_)
+        {
+            run_template_backbone_device(z);
+            this->zf_.clear();
+            this->zf_shape_ = this->backbone_output_shape_;
+        }
+        else
+        {
+            this->zf_ = run_backbone(z, this->zf_shape_);
+            this->zf_ = align_feature(this->zf_, this->zf_shape_,
+                                      this->head_template_hw_, this->zf_shape_);
+        }
     }
     this->last_score_ = 1.0f;
 
@@ -634,13 +668,35 @@ int NanotrackTRT::init(const cv::Mat &img, DrOBB bbox)
     this->object_box.box = bbox.box;
     this->object_box.score = 1.0f;
     this->object_box.class_id = bbox.class_id;
+    this->template_ready_ = true;
 
     return 0;
 }
 
 const DrOBB &NanotrackTRT::track(const cv::Mat &img)
 {
-    if (img.empty() || this->zf_.empty())
+    if (img.channels() != 3)
+    {
+        std::memset(&this->object_box, 0, sizeof(DrOBB));
+        return this->object_box;
+    }
+    return trackImpl(img);
+}
+
+const DrOBB &NanotrackTRT::trackRgba(const cv::Mat &rgba)
+{
+    if (rgba.channels() != 4)
+    {
+        std::memset(&this->object_box, 0, sizeof(DrOBB));
+        return this->object_box;
+    }
+    return trackImpl(rgba);
+}
+
+const DrOBB &NanotrackTRT::trackImpl(const cv::Mat &img)
+{
+    if (img.empty() || !this->template_ready_ ||
+        (this->use_merge_ && this->zf_.empty()))
     {
         std::memset(&this->object_box, 0, sizeof(DrOBB));
         return this->object_box;
@@ -692,13 +748,19 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
             return this->object_box;
         }
 
-        std::vector<int64_t> xf_shape;
-        auto xf = run_search_backbone(x, xf_shape);
-        xf = align_feature(xf, xf_shape, this->head_search_hw_, xf_shape);
-
-        auto head_outputs =
-            run_head(this->zf_, this->zf_shape_, xf, xf_shape, cls_shape,
-                     loc_shape);
+        std::pair<std::vector<float>, std::vector<float>> head_outputs;
+        if (this->direct_split_features_)
+        {
+            head_outputs = run_split_device(x, cls_shape, loc_shape);
+        }
+        else
+        {
+            std::vector<int64_t> xf_shape;
+            auto xf = run_search_backbone(x, xf_shape);
+            xf = align_feature(xf, xf_shape, this->head_search_hw_, xf_shape);
+            head_outputs = run_head(this->zf_, this->zf_shape_, xf, xf_shape,
+                                    cls_shape, loc_shape);
+        }
         cls = std::move(head_outputs.first);
         loc = std::move(head_outputs.second);
     }
@@ -708,6 +770,7 @@ const DrOBB &NanotrackTRT::track(const cv::Mat &img)
         ensureScoreSize(static_cast<int>(cls_shape[2]));
     }
 
+    NvtxScope postprocess_scope("sot.nanotrack.postprocess");
     auto score = convert_score(cls, cls_shape);
     auto pred_bbox = convert_bbox(loc, loc_shape);
 
@@ -788,6 +851,7 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_merge(
     const std::vector<float> &x, const std::vector<int64_t> &x_shape,
     std::vector<int64_t> &cls_shape, std::vector<int64_t> &loc_shape)
 {
+    NvtxScope inference_scope("sot.nanotrack.merged_engine");
     (void)z_shape;
     (void)x_shape;
 
@@ -799,10 +863,10 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_merge(
         return {};
     }
 
-    CHECK(cudaMemcpyAsync(this->dev_merge_input_z_, z.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_merge_input_z_, z.data(),
                           this->merge_input_z_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
-    CHECK(cudaMemcpyAsync(this->dev_merge_input_x_, x.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_merge_input_x_, x.data(),
                           this->merge_input_x_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
@@ -815,18 +879,22 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_merge(
     this->context->setTensorAddress(this->merge_output_loc_name_.c_str(),
                                     this->dev_merge_output_loc_);
 
-    this->context->enqueueV3(this->stream);
+    if (!this->context->enqueueV3(this->stream))
+        throw std::runtime_error("NanoTrack merge inference enqueue failed");
 
-    CHECK(cudaMemcpyAsync(this->merge_output_cls_.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->merge_output_cls_.data(),
                           this->dev_merge_output_cls_,
                           this->merge_output_cls_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
-    CHECK(cudaMemcpyAsync(this->merge_output_loc_.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->merge_output_loc_.data(),
                           this->dev_merge_output_loc_,
                           this->merge_output_loc_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    {
+        NvtxScope sync_scope("sot.nanotrack.sync");
+        SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+    }
 
     cls_shape = this->merge_cls_shape_;
     loc_shape = this->merge_loc_shape_;
@@ -837,13 +905,14 @@ std::vector<float>
 NanotrackTRT::run_backbone(const std::vector<float> &input,
                            std::vector<int64_t> &out_shape)
 {
+    NvtxScope backbone_scope("sot.nanotrack.template_backbone");
     if (input.size() != static_cast<size_t>(this->backbone_input_size_))
     {
         out_shape.clear();
         return {};
     }
 
-    CHECK(cudaMemcpyAsync(this->dev_backbone_input_, input.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_backbone_input_, input.data(),
                           this->backbone_input_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
@@ -851,14 +920,18 @@ NanotrackTRT::run_backbone(const std::vector<float> &input,
         this->backbone_input_name_.c_str(), this->dev_backbone_input_);
     this->backbone_.context->setTensorAddress(
         this->backbone_output_name_.c_str(), this->dev_backbone_output_);
-    this->backbone_.context->enqueueV3(this->stream);
+    if (!this->backbone_.context->enqueueV3(this->stream))
+        throw std::runtime_error("NanoTrack template backbone enqueue failed");
 
-    CHECK(cudaMemcpyAsync(this->backbone_output_.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->backbone_output_.data(),
                           this->dev_backbone_output_,
                           this->backbone_output_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    {
+        NvtxScope sync_scope("sot.nanotrack.sync");
+        SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+    }
 
     out_shape = this->backbone_output_shape_;
     return this->backbone_output_;
@@ -868,6 +941,7 @@ std::vector<float>
 NanotrackTRT::run_search_backbone(const std::vector<float> &input,
                                   std::vector<int64_t> &out_shape)
 {
+    NvtxScope backbone_scope("sot.nanotrack.search_backbone");
     if (input.size() != static_cast<size_t>(this->search_input_size_))
     {
         out_shape.clear();
@@ -878,7 +952,7 @@ NanotrackTRT::run_search_backbone(const std::vector<float> &input,
         this->has_search_backbone_ ? this->search_backbone_.context
                                    : this->backbone_.context;
 
-    CHECK(cudaMemcpyAsync(this->dev_search_input_, input.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_search_input_, input.data(),
                           this->search_input_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
@@ -886,13 +960,17 @@ NanotrackTRT::run_search_backbone(const std::vector<float> &input,
                           this->dev_search_input_);
     ctx->setTensorAddress(this->search_output_name_.c_str(),
                           this->dev_search_output_);
-    ctx->enqueueV3(this->stream);
+    if (!ctx->enqueueV3(this->stream))
+        throw std::runtime_error("NanoTrack search backbone enqueue failed");
 
-    CHECK(cudaMemcpyAsync(this->search_output_.data(), this->dev_search_output_,
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->search_output_.data(), this->dev_search_output_,
                           this->search_output_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    {
+        NvtxScope sync_scope("sot.nanotrack.sync");
+        SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+    }
 
     out_shape = this->search_output_shape_;
     return this->search_output_;
@@ -903,6 +981,7 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_head(
     const std::vector<float> &xf, const std::vector<int64_t> &xf_shape,
     std::vector<int64_t> &cls_shape, std::vector<int64_t> &loc_shape)
 {
+    NvtxScope head_scope("sot.nanotrack.head");
     (void)zf_shape;
     (void)xf_shape;
 
@@ -914,10 +993,10 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_head(
         return {};
     }
 
-    CHECK(cudaMemcpyAsync(this->dev_head_input_z_, zf.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_head_input_z_, zf.data(),
                           this->head_input_z_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
-    CHECK(cudaMemcpyAsync(this->dev_head_input_x_, xf.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->dev_head_input_x_, xf.data(),
                           this->head_input_x_size_ * sizeof(float),
                           cudaMemcpyHostToDevice, this->stream));
 
@@ -930,19 +1009,106 @@ std::pair<std::vector<float>, std::vector<float>> NanotrackTRT::run_head(
     this->context->setTensorAddress(this->head_output_loc_name_.c_str(),
                                     this->dev_head_output_loc_);
 
-    this->context->enqueueV3(this->stream);
+    if (!this->context->enqueueV3(this->stream))
+        throw std::runtime_error("NanoTrack head inference enqueue failed");
 
-    CHECK(cudaMemcpyAsync(this->head_output_cls_.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->head_output_cls_.data(),
                           this->dev_head_output_cls_,
                           this->head_output_cls_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
-    CHECK(cudaMemcpyAsync(this->head_output_loc_.data(),
+    SOT_CUDA_CHECK(cudaMemcpyAsync(this->head_output_loc_.data(),
                           this->dev_head_output_loc_,
                           this->head_output_loc_size_ * sizeof(float),
                           cudaMemcpyDeviceToHost, this->stream));
 
-    cudaStreamSynchronize(this->stream);
+    {
+        NvtxScope sync_scope("sot.nanotrack.sync");
+        SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+    }
 
+    cls_shape = this->head_cls_shape_;
+    loc_shape = this->head_loc_shape_;
+    return {this->head_output_cls_, this->head_output_loc_};
+}
+
+void NanotrackTRT::run_template_backbone_device(
+    const std::vector<float> &input)
+{
+    NvtxScope backbone_scope("sot.nanotrack.template_backbone_device");
+    if (input.size() != static_cast<size_t>(this->backbone_input_size_))
+        throw std::runtime_error("NanoTrack template input size mismatch");
+
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
+        this->dev_backbone_input_, input.data(),
+        this->backbone_input_size_ * sizeof(float), cudaMemcpyHostToDevice,
+        this->stream));
+    this->backbone_.context->setTensorAddress(
+        this->backbone_input_name_.c_str(), this->dev_backbone_input_);
+    this->backbone_.context->setTensorAddress(
+        this->backbone_output_name_.c_str(), this->dev_backbone_output_);
+    if (!this->backbone_.context->enqueueV3(this->stream))
+        throw std::runtime_error("NanoTrack template backbone enqueue failed");
+
+    NvtxScope sync_scope("sot.nanotrack.init_sync");
+    SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+}
+
+std::pair<std::vector<float>, std::vector<float>>
+NanotrackTRT::run_split_device(const std::vector<float> &search,
+                               std::vector<int64_t> &cls_shape,
+                               std::vector<int64_t> &loc_shape)
+{
+    if (search.size() != static_cast<size_t>(this->search_input_size_))
+    {
+        cls_shape.clear();
+        loc_shape.clear();
+        return {};
+    }
+
+    IExecutionContext *search_context =
+        this->has_search_backbone_ ? this->search_backbone_.context
+                                   : this->backbone_.context;
+    {
+        NvtxScope backbone_scope("sot.nanotrack.search_backbone_device");
+        SOT_CUDA_CHECK(cudaMemcpyAsync(
+            this->dev_search_input_, search.data(),
+            this->search_input_size_ * sizeof(float), cudaMemcpyHostToDevice,
+            this->stream));
+        search_context->setTensorAddress(this->search_input_name_.c_str(),
+                                         this->dev_search_input_);
+        search_context->setTensorAddress(this->search_output_name_.c_str(),
+                                         this->dev_search_output_);
+        if (!search_context->enqueueV3(this->stream))
+            throw std::runtime_error(
+                "NanoTrack search backbone enqueue failed");
+    }
+
+    {
+        NvtxScope head_scope("sot.nanotrack.head_device");
+        this->context->setTensorAddress(this->head_input_z_name_.c_str(),
+                                        this->dev_backbone_output_);
+        this->context->setTensorAddress(this->head_input_x_name_.c_str(),
+                                        this->dev_search_output_);
+        this->context->setTensorAddress(this->head_output_cls_name_.c_str(),
+                                        this->dev_head_output_cls_);
+        this->context->setTensorAddress(this->head_output_loc_name_.c_str(),
+                                        this->dev_head_output_loc_);
+        if (!this->context->enqueueV3(this->stream))
+            throw std::runtime_error("NanoTrack head inference enqueue failed");
+        SOT_CUDA_CHECK(cudaMemcpyAsync(
+            this->head_output_cls_.data(), this->dev_head_output_cls_,
+            this->head_output_cls_size_ * sizeof(float),
+            cudaMemcpyDeviceToHost, this->stream));
+        SOT_CUDA_CHECK(cudaMemcpyAsync(
+            this->head_output_loc_.data(), this->dev_head_output_loc_,
+            this->head_output_loc_size_ * sizeof(float),
+            cudaMemcpyDeviceToHost, this->stream));
+    }
+
+    {
+        NvtxScope sync_scope("sot.nanotrack.sync");
+        SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
+    }
     cls_shape = this->head_cls_shape_;
     loc_shape = this->head_loc_shape_;
     return {this->head_output_cls_, this->head_output_loc_};
@@ -989,6 +1155,7 @@ std::vector<float> NanotrackTRT::get_subwindow(const cv::Mat &im,
                                                int original_sz,
                                                const cv::Scalar &avg_chans)
 {
+    NvtxScope crop_scope("sot.nanotrack.crop_resize_color_chw");
     float c = (original_sz + 1) * 0.5f;
     int context_xmin = static_cast<int>(std::floor(pos.x - c + 0.5f));
     int context_xmax = context_xmin + original_sz - 1;
@@ -1025,7 +1192,12 @@ std::vector<float> NanotrackTRT::get_subwindow(const cv::Mat &im,
         cv::resize(im_patch, im_patch, cv::Size(model_sz, model_sz));
     }
 
+    const int channels = im_patch.channels();
+    if (channels != 3 && channels != 4)
+        return {};
     std::vector<float> data(1 * 3 * model_sz * model_sz);
+    const int source_channel[3] = {channels == 4 ? 2 : 0, 1,
+                                   channels == 4 ? 0 : 2};
     for (int cidx = 0; cidx < 3; ++cidx)
     {
         for (int y = 0; y < model_sz; ++y)
@@ -1034,7 +1206,7 @@ std::vector<float> NanotrackTRT::get_subwindow(const cv::Mat &im,
             for (int x = 0; x < model_sz; ++x)
             {
                 data[cidx * model_sz * model_sz + y * model_sz + x] =
-                    static_cast<float>(row_ptr[x * 3 + cidx]);
+                    static_cast<float>(row_ptr[x * channels + source_channel[cidx]]);
             }
         }
     }

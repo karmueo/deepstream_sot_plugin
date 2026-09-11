@@ -64,8 +64,7 @@ public:
     NvMOTStatus removeStream(const NvMOTStreamId streamIdMask);
 
 protected:
-    std::shared_ptr<DeepTracker> tracker_;
-    int tmpId_ = 0;
+    std::unordered_map<NvMOTStreamId, std::unique_ptr<DeepTracker>> trackers_;
     TRACKER_CONFIG trackerConfig_; // 跟踪器配置
     struct FpsState
     {
@@ -76,6 +75,7 @@ protected:
     };
     std::unordered_map<NvMOTStreamId, FpsState> fpsState_;
     std::chrono::seconds fpsUpdateInterval_{3};
+    bool debugLogging_ = false;
 };
 
 #endif // DNSTARPROD_TRACKER_H

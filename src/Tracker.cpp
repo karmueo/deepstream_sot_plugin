@@ -13,7 +13,16 @@ int parseConfigFile(const char *pCustomConfigFilePath, TRACKER_CONFIG &trackerCo
     }
 
     // 使用YAML库加载配置文件
-    YAML::Node configyml = YAML::LoadFile(pCustomConfigFilePath);
+    YAML::Node configyml;
+    try
+    {
+        configyml = YAML::LoadFile(pCustomConfigFilePath);
+    }
+    catch (const YAML::Exception &e)
+    {
+        std::cerr << "Failed to parse config file: " << e.what() << std::endl;
+        return -1;
+    }
     if (!configyml)
     {
         std::cerr << "Failed to load config file: " << pCustomConfigFilePath << std::endl;
@@ -370,6 +379,8 @@ NvMOTStatus NvMOT_Query(uint16_t customConfigFilePathSize,
                         NvMOTQuery *pQuery)
 {
     (void)customConfigFilePathSize;
+    if (pQuery == nullptr)
+        return NvMOTStatus_Error;
     TRACKER_CONFIG trackerConfig;
     // 解析自定义配置文件
     if (parseConfigFile(pCustomConfigFilePath, trackerConfig) != 0)
@@ -388,14 +399,23 @@ NvMOTStatus NvMOT_Query(uint16_t customConfigFilePathSize,
 #endif
     pQuery->batchMode = NvMOTBatchMode_Batch;          // batchMode must be set as NvMOTBatchMode_Batch
     pQuery->colorFormats[0] = NVBUF_COLOR_FORMAT_RGBA; // among {NVBUF_COLOR_FORMAT_NV12, NVBUF_COLOR_FORMAT_RGBA}
-    pQuery->supportPastFrame = true;
+    pQuery->supportPastFrame = false;
 
     pQuery->maxTargetsPerStream = MAX_TARGETS_PER_STREAM; // Max number of targets stored for each stream
 
     /** 可选配置以设置其他功能。 */
-    pQuery->maxShadowTrackingAge = trackerConfig.targetManagement.maxTrackAge; // 如果 supportPastFrame 为 true，则需要跟踪阴影的最大长度
+    pQuery->maxShadowTrackingAge = 0;
     pQuery->outputReidTensor = false;  // 仅当低级跟踪器支持输出 reid 特性时设置为 true
-    pQuery->reidFeatureSize = 256;     // Re-ID特征的大小，如果outputReidTensor为true，则为必需
+    pQuery->reidFeatureSize = 0;
+    pQuery->outputTrajectory = false;
+    pQuery->outputVisibility = false;
+    pQuery->outputFootLocation = false;
+    pQuery->outputConvexHull = false;
+    pQuery->maxConvexHullSize = 0;
+    pQuery->outputTerminatedTracks = false;
+    pQuery->maxTrajectoryBufferLength = 0;
+    pQuery->outputShadowTracks = false;
+    pQuery->contextHandle = nullptr;
 
     std::cout << "[Track Initialized]" << std::endl;
     return NvMOTStatus_OK;
@@ -405,16 +425,31 @@ NvMOTStatus NvMOT_Init(NvMOTConfig *pConfigIn,
                        NvMOTContextHandle *pContextHandle,
                        NvMOTConfigResponse *pConfigResponse)
 {
-    if (pContextHandle != nullptr)
-    {
-        NvMOT_DeInit(*pContextHandle);
-    }
+    if (pConfigIn == nullptr || pContextHandle == nullptr ||
+        pConfigResponse == nullptr)
+        return NvMOTStatus_Error;
+    *pContextHandle = nullptr;
 
     /// 用户定义的上下文类
     NvMOTContext *pContext = nullptr;
 
     /// 实例化用户定义的上下文
-    pContext = new NvMOTContext(*pConfigIn, *pConfigResponse);
+    try
+    {
+        pContext = new NvMOTContext(*pConfigIn, *pConfigResponse);
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Failed to initialize SOT context: " << e.what() << std::endl;
+        pConfigResponse->summaryStatus = NvMOTConfigStatus_Error;
+        return NvMOTStatus_Error;
+    }
+
+    if (pConfigResponse->summaryStatus != NvMOTConfigStatus_OK)
+    {
+        delete pContext;
+        return NvMOTStatus_Error;
+    }
 
     /// 将指针作为上下文句柄传递
     *pContextHandle = pContext;
@@ -424,11 +459,8 @@ NvMOTStatus NvMOT_Init(NvMOTConfig *pConfigIn,
 
 void NvMOT_DeInit(NvMOTContextHandle contextHandle)
 {
-    /// 销毁上下文句柄
     if (contextHandle == nullptr)
-    {
         return;
-    }
     delete contextHandle;
 }
 
@@ -436,6 +468,9 @@ NvMOTStatus NvMOT_Process(NvMOTContextHandle contextHandle,
                           NvMOTProcessParams *pParams,
                           NvMOTTrackedObjBatch *pTrackedObjectsBatch)
 {
+    if (contextHandle == nullptr || pParams == nullptr ||
+        pTrackedObjectsBatch == nullptr)
+        return NvMOTStatus_Error;
     /// 使用上下文中的用户定义方法处理给定的视频帧，并生成输出
     return contextHandle->processFrame(pParams, pTrackedObjectsBatch);
 }
@@ -444,6 +479,9 @@ NvMOTStatus NvMOT_RetrieveMiscData(NvMOTContextHandle contextHandle,
                                    NvMOTProcessParams *pParams,
                                    NvMOTTrackerMiscData *pTrackerMiscData)
 {
+    if (contextHandle == nullptr || pParams == nullptr ||
+        pTrackerMiscData == nullptr)
+        return NvMOTStatus_Error;
     /// 如果有，请检索过去帧的数据
     return contextHandle->retrieveMiscData(pParams, pTrackerMiscData);
 }
@@ -451,6 +489,8 @@ NvMOTStatus NvMOT_RetrieveMiscData(NvMOTContextHandle contextHandle,
 NvMOTStatus NvMOT_RemoveStreams(NvMOTContextHandle contextHandle,
                                 NvMOTStreamId streamIdMask)
 {
+    if (contextHandle == nullptr)
+        return NvMOTStatus_Error;
     /// 从低级跟踪器上下文中删除指定的视频流
     return contextHandle->removeStream(streamIdMask);
 }

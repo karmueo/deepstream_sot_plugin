@@ -46,25 +46,25 @@ void OstrackTRT::initIOBuffer()
     // INPUT
     this->input_template = new float[input_template_size];
     this->input_search = new float[input_search_size];
-    CHECK(cudaMalloc(&this->dev_input_template, this->input_template_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_input_search, this->input_search_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_template, this->input_template_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_input_search, this->input_search_size * sizeof(float)));
 
     // OUTPUT
     this->output_score_map = new float[this->output_score_map_size];
     this->output_size_map = new float[this->output_size_map_size];
     this->output_offset_map = new float[this->output_offset_map_size];
-    CHECK(cudaMalloc(&this->dev_output_score_map, this->output_score_map_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_output_size_map, this->output_size_map_size * sizeof(float)));
-    CHECK(cudaMalloc(&this->dev_output_offset_map, this->output_offset_map_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_score_map, this->output_score_map_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_size_map, this->output_size_map_size * sizeof(float)));
+    SOT_CUDA_CHECK(cudaMalloc(&this->dev_output_offset_map, this->output_offset_map_size * sizeof(float)));
 }
 
 void OstrackTRT::destroyIOBuffer()
 {
-    CHECK(cudaFree(this->dev_input_template));
-    CHECK(cudaFree(this->dev_input_search));
-    CHECK(cudaFree(this->dev_output_score_map));
-    CHECK(cudaFree(this->dev_output_size_map));
-    CHECK(cudaFree(this->dev_output_offset_map));
+    (void)cudaFree(this->dev_input_template);
+    (void)cudaFree(this->dev_input_search);
+    (void)cudaFree(this->dev_output_score_map);
+    (void)cudaFree(this->dev_output_size_map);
+    (void)cudaFree(this->dev_output_offset_map);
 }
 
 int OstrackTRT::init(const cv::Mat &img, DrOBB bbox)
@@ -137,13 +137,13 @@ const DrOBB &OstrackTRT::track(const cv::Mat &img)
 
 void OstrackTRT::infer()
 {
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->dev_input_template,
         this->input_template,
         this->input_template_size * sizeof(float),
         cudaMemcpyHostToDevice,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->dev_input_search,
         this->input_search,
         this->input_search_size * sizeof(float),
@@ -156,25 +156,26 @@ void OstrackTRT::infer()
     context->setTensorAddress(this->output_1, this->dev_output_size_map);
     context->setTensorAddress(this->output_2, this->dev_output_offset_map);
 
-    this->context->enqueueV3(this->stream);
+    if (!this->context->enqueueV3(this->stream))
+        throw std::runtime_error("OSTrack inference enqueue failed");
 
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->output_score_map,
         this->dev_output_score_map,
         this->output_score_map_size * sizeof(float),
         cudaMemcpyDeviceToHost,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->output_size_map,
         this->dev_output_size_map,
         this->output_size_map_size * sizeof(float),
         cudaMemcpyDeviceToHost,
         this->stream));
-    CHECK(cudaMemcpyAsync(
+    SOT_CUDA_CHECK(cudaMemcpyAsync(
         this->output_offset_map,
         this->dev_output_offset_map,
         this->output_offset_map_size * sizeof(float),
         cudaMemcpyDeviceToHost,
         this->stream));
-    cudaStreamSynchronize(this->stream);
+    SOT_CUDA_CHECK(cudaStreamSynchronize(this->stream));
 }

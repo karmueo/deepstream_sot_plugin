@@ -6,7 +6,7 @@
 #include <vector>
 #include <map>
 #include <memory>
-#include <assert.h>
+#include <stdexcept>
 #include "opencv2/opencv.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
@@ -19,15 +19,15 @@
 
 using namespace nvinfer1;
 
-#define CHECK(status)                                          \
-    do                                                         \
-    {                                                          \
-        auto ret = (status);                                   \
-        if (ret != 0)                                          \
-        {                                                      \
-            std::cerr << "Cuda failure: " << ret << std::endl; \
-            abort();                                           \
-        }                                                      \
+#define SOT_CUDA_CHECK(status)                                       \
+    do                                                               \
+    {                                                                \
+        const cudaError_t ret = (status);                            \
+        if (ret != cudaSuccess)                                      \
+        {                                                            \
+            throw std::runtime_error(std::string("CUDA failure: ") + \
+                                     cudaGetErrorString(ret));       \
+        }                                                            \
     } while (0)
 
 struct DrBBox
@@ -66,6 +66,12 @@ public:
     virtual int init(const cv::Mat &img, DrOBB bbox) = 0;
 
     virtual const DrOBB &track(const cv::Mat &img) = 0;
+
+    // DeepStream provides RGBA. The default implementation preserves support
+    // for the older trackers; NanoTrack overrides these methods and only
+    // converts its template/search patches.
+    virtual int initRgba(const cv::Mat &rgba, DrOBB bbox);
+    virtual const DrOBB &trackRgba(const cv::Mat &rgba);
 
 protected: 
     // FIXME: 做异常处理
@@ -111,7 +117,7 @@ protected:
 
     DrBBox state;
     DrOBB object_box;
-    cudaStream_t stream;
+    cudaStream_t stream = nullptr;
 };
 
 #endif

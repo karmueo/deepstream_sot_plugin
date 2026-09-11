@@ -1,25 +1,27 @@
 #include "deepTracker.h"
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 // 计算两个矩形框的IOU
-static float IOU(const cv::Rect &srcRect, const cv::Rect &dstRect)
+static float IOU(const cv::Rect2f &srcRect, const cv::Rect2f &dstRect)
 {
-    cv::Rect intersection;
+    cv::Rect2f intersection;
     intersection = srcRect & dstRect;
 
     auto  area_src = static_cast<float>(srcRect.area());
     auto  area_dst = static_cast<float>(dstRect.area());
     auto  area_intersection = static_cast<float>(intersection.area());
-    float iou = area_intersection / (area_src + area_dst - area_intersection);
-    return iou;
+    const float union_area = area_src + area_dst - area_intersection;
+    return union_area > 0.0f ? area_intersection / union_area : 0.0f;
 }
 
 DeepTracker::DeepTracker(const std::string    &engine_name,
                          const TRACKER_CONFIG &trackerConfig)
 {
     trackerConfig_ = trackerConfig;
-    list_capacity_ = trackerConfig_.targetManagement
-                         .maxTrackAge; // 设置默认容量为最大跟踪年龄
+    list_capacity_ = std::max<uint32_t>(
+        1, trackerConfig_.targetManagement.maxTrackAge);
     is_tracked_ = false;
     confirmAgeThreshold_ = trackerConfig_.confirmAgeThreshold;
     age_ = 0;
@@ -94,21 +96,12 @@ DeepTracker::DeepTracker(const std::string    &engine_name,
     }
 
     frameNum_ = 0;
-    list_ = nullptr;
-    list_size_ = 0;
     // 来自配置的开关与阈值（由 parseConfigFile 填充默认值）
     enableTrackCenterStable_ = trackerConfig_.enableTrackCenterStable; // 是否启用跟踪中心稳定判断
     trackCenterStablePixelThreshold_ = trackerConfig_.trackCenterStablePixelThreshold; // 像素阈值
 }
 
-DeepTracker::~DeepTracker()
-{
-    if (list_ != nullptr)
-    {
-        delete[] list_;
-        list_ = nullptr;
-    }
-}
+DeepTracker::~DeepTracker() = default;
 
 TrackInfo DeepTracker::update(const cv::Mat             &img,
                               const NvMOTObjToTrackList *detectObjList,
@@ -117,6 +110,8 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
 {
     frameNum_ = frameNum;
     bool is_good_track = false;
+    trackInfo_.initialized = false;
+    trackInfo_.reset = false;
 
     if (matchedDetectId != nullptr)
     {
@@ -127,7 +122,7 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
     if (is_tracked_ == false)
     {
         if (img.empty() || detectObjList == nullptr ||
-            detectObjList->numFilled == 0)
+            detectObjList->list == nullptr || detectObjList->numFilled == 0)
         {
             memset(&trackInfo_, 0, sizeof(trackInfo_));
             return trackInfo_;
@@ -138,15 +133,15 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
         auto image_cx = img.cols / 2.f;
         auto image_cy = img.rows / 2.f;
 
-        NvMOTObjToTrack *closest_class1 = nullptr; // 记录最近的目标
-        NvMOTObjToTrack *closest_any = nullptr; // 记录最近的目标（不限classId）
+        const NvMOTObjToTrack *closest_class1 = nullptr; // 记录最近的目标
+        const NvMOTObjToTrack *closest_any = nullptr; // 记录最近的目标（不限classId）
         float            min_distance_class1 = FLT_MAX; // classId=1的最小距离
         float            min_distance_any = FLT_MAX;    // 所有目标的最小距离
         for (uint32_t numObjects = 0; numObjects < detectObjList->numFilled;
              numObjects++)
         {
             // 直接使用数组元素的指针，避免局部变量作用域问题
-            NvMOTObjToTrack *pObj = &detectObjList->list[numObjects];
+            const NvMOTObjToTrack *pObj = &detectObjList->list[numObjects];
 
             // 计算目标中心到图像中心的曼哈顿距离
             float obj_cx = pObj->bbox.x + pObj->bbox.width * 0.5f;
@@ -169,45 +164,64 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
             }
         }
         // 优先选择classId=1的目标，若无则选最近目标
-        objectToTrack_ =
+        const NvMOTObjToTrack *objectToTrack =
             (closest_class1 != nullptr) ? closest_class1 : closest_any;
 
-        trackInfo_.bbox.box.x0 = objectToTrack_->bbox.x;
+        if (objectToTrack == nullptr || trackerPtr_ == nullptr ||
+            !std::isfinite(objectToTrack->bbox.x) ||
+            !std::isfinite(objectToTrack->bbox.y) ||
+            !std::isfinite(objectToTrack->bbox.width) ||
+            !std::isfinite(objectToTrack->bbox.height) ||
+            objectToTrack->bbox.width <= 0 || objectToTrack->bbox.height <= 0)
+        {
+            memset(&trackInfo_, 0, sizeof(trackInfo_));
+            return trackInfo_;
+        }
+
+        trackInfo_.bbox.box.x0 = objectToTrack->bbox.x;
         trackInfo_.bbox.box.x1 =
-            objectToTrack_->bbox.x + objectToTrack_->bbox.width;
-        trackInfo_.bbox.box.y0 = objectToTrack_->bbox.y;
+            objectToTrack->bbox.x + objectToTrack->bbox.width;
+        trackInfo_.bbox.box.y0 = objectToTrack->bbox.y;
         trackInfo_.bbox.box.y1 =
-            objectToTrack_->bbox.y + objectToTrack_->bbox.height;
-        trackInfo_.bbox.box.w = objectToTrack_->bbox.width;
-        trackInfo_.bbox.box.h = objectToTrack_->bbox.height;
+            objectToTrack->bbox.y + objectToTrack->bbox.height;
+        trackInfo_.bbox.box.w = objectToTrack->bbox.width;
+        trackInfo_.bbox.box.h = objectToTrack->bbox.height;
         trackInfo_.bbox.box.cx =
             (trackInfo_.bbox.box.x0 + trackInfo_.bbox.box.x1) / 2.f;
         trackInfo_.bbox.box.cy =
             (trackInfo_.bbox.box.y0 + trackInfo_.bbox.box.y1) / 2.f;
-        trackInfo_.bbox.score = objectToTrack_->confidence;
-        trackInfo_.bbox.class_id = objectToTrack_->classId;
-        // mixformer_->init(img, trackInfo_.bbox);
-        trackerPtr_->init(img, trackInfo_.bbox);
-
-        if (list_ != nullptr)
+        trackInfo_.bbox.score = objectToTrack->confidence;
+        trackInfo_.bbox.class_id = objectToTrack->classId;
+        if (trackerPtr_->initRgba(img, trackInfo_.bbox) != 0)
         {
-            delete[] list_;
-            list_ = nullptr;
+            std::cerr << "SOT tracker initialization failed" << std::endl;
+            history_.clear();
+            memset(&trackInfo_, 0, sizeof(trackInfo_));
+            return trackInfo_;
         }
-        list_size_ = 0;
-        list_ = new NvDsTargetMiscDataFrame[trackerConfig_.targetManagement
-                                                .maxTrackAge];
-
+        history_.clear();
         is_tracked_ = true;
+        trackInfo_.initialized = true;
     }
     else
     {
         // 更新跟踪器并获取跟踪结果
         // trackInfo_.bbox = mixformer_->track(img);
-        trackInfo_.bbox = trackerPtr_->track(img);
+        if (trackerPtr_ == nullptr)
+        {
+            is_tracked_ = false;
+            memset(&trackInfo_, 0, sizeof(trackInfo_));
+            return trackInfo_;
+        }
+        trackInfo_.bbox = trackerPtr_->trackRgba(img);
         bool is_track_match_detect = true;
 
-        if (trackInfo_.bbox.score <= 0 || trackInfo_.bbox.box.w <= 0 ||
+        if (!std::isfinite(trackInfo_.bbox.score) ||
+            !std::isfinite(trackInfo_.bbox.box.x0) ||
+            !std::isfinite(trackInfo_.bbox.box.y0) ||
+            !std::isfinite(trackInfo_.bbox.box.w) ||
+            !std::isfinite(trackInfo_.bbox.box.h) ||
+            trackInfo_.bbox.score <= 0 || trackInfo_.bbox.box.w <= 0 ||
             trackInfo_.bbox.box.h <= 0)
         {
             // 如果跟踪结果的分数小于等于0，或者宽度或高度小于等于0，认为跟踪失败
@@ -217,13 +231,16 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
         {
             // 如果有检测结果，和检测结果对比来查看跟踪是否正确
             float iou = 0.;
+            const bool hasDetections = detectObjList != nullptr &&
+                                       detectObjList->list != nullptr &&
+                                       detectObjList->numFilled != 0;
             if (age_ > trackerConfig_.targetManagement.probationAge)
             {
-                if (detectObjList->numFilled != 0)
+                if (hasDetections)
                 {
                     is_track_match_detect = false;
                     // 计算和所有检测frame->objectsIn.list结果的IOU
-                    cv::Rect trackRect = cv::Rect(
+                    cv::Rect2f trackRect(
                         trackInfo_.bbox.box.x0, trackInfo_.bbox.box.y0,
                         trackInfo_.bbox.box.x1 - trackInfo_.bbox.box.x0,
                         trackInfo_.bbox.box.y1 - trackInfo_.bbox.box.y0);
@@ -231,9 +248,15 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
                     {
                         NvMOTObjToTrack obj = detectObjList->list[i];
                         // 计算IOU
-                        cv::Rect detectionRect =
-                            cv::Rect(obj.bbox.x, obj.bbox.y, obj.bbox.width,
-                                     obj.bbox.height);
+                        if (!std::isfinite(obj.bbox.x) ||
+                            !std::isfinite(obj.bbox.y) ||
+                            !std::isfinite(obj.bbox.width) ||
+                            !std::isfinite(obj.bbox.height) ||
+                            obj.bbox.width <= 0 || obj.bbox.height <= 0)
+                            continue;
+                        cv::Rect2f detectionRect(
+                            obj.bbox.x, obj.bbox.y, obj.bbox.width,
+                            obj.bbox.height);
 
                         iou = IOU(detectionRect, trackRect);
                         if (iou > trackerConfig_.targetManagement.iouThreshold)
@@ -277,10 +300,10 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
             {
                 // 如果跟踪确认次数小于阈值，当检测结果为空时，认为失败，也就说必须连续有检测结果,且检测结果和跟踪结果的IOU大于阈值，才能认为跟踪成功
                 is_track_match_detect = false;
-                if (detectObjList->numFilled != 0)
+                if (hasDetections)
                 {
                     // 计算和所有检测frame->objectsIn.list结果的IOU
-                    cv::Rect trackRect = cv::Rect(
+                    cv::Rect2f trackRect(
                         trackInfo_.bbox.box.x0, trackInfo_.bbox.box.y0,
                         trackInfo_.bbox.box.x1 - trackInfo_.bbox.box.x0,
                         trackInfo_.bbox.box.y1 - trackInfo_.bbox.box.y0);
@@ -288,9 +311,15 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
                     {
                         NvMOTObjToTrack obj = detectObjList->list[i];
                         // 计算IOU
-                        cv::Rect detectionRect =
-                            cv::Rect(obj.bbox.x, obj.bbox.y, obj.bbox.width,
-                                     obj.bbox.height);
+                        if (!std::isfinite(obj.bbox.x) ||
+                            !std::isfinite(obj.bbox.y) ||
+                            !std::isfinite(obj.bbox.width) ||
+                            !std::isfinite(obj.bbox.height) ||
+                            obj.bbox.width <= 0 || obj.bbox.height <= 0)
+                            continue;
+                        cv::Rect2f detectionRect(
+                            obj.bbox.x, obj.bbox.y, obj.bbox.width,
+                            obj.bbox.height);
 
                         iou = IOU(detectionRect, trackRect);
                         if (iou > trackerConfig_.targetManagement.iouThreshold)
@@ -326,13 +355,11 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
             // 失败次数大于阈值，重置跟踪
             is_tracked_ = false;
             age_ = 0;
-            if (trackId_++ > 0xFFFFFFFF)
-            {
-                trackId_ = 0;
-            }
+            trackId_ = (trackId_ >= 0xFFFFFFFFLL) ? 0 : trackId_ + 1;
 
             miss_ = 0;
             memset(&trackInfo_, 0, sizeof(trackInfo_));
+            trackInfo_.reset = true;
             return trackInfo_;
         }
 
@@ -345,68 +372,35 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
 
     if (is_good_track)
     {
-        if (age_ < list_capacity_)
-        {
-            list_[age_].age = age_;
-            list_[age_].tBbox.left = trackInfo_.bbox.box.x0;
-            list_[age_].tBbox.top = trackInfo_.bbox.box.y0;
-            list_[age_].tBbox.width =
-                trackInfo_.bbox.box.x1 - trackInfo_.bbox.box.x0;
-            list_[age_].tBbox.height =
-                trackInfo_.bbox.box.y1 - trackInfo_.bbox.box.y0;
-            list_[age_].confidence = trackInfo_.bbox.score;
-            list_[age_].trackerState = ACTIVE;
-            list_[age_].visibility = 1.0;
-            list_[age_].frameNum = frameNum_;
-            list_size_ = age_ + 1;
-        }
-        else
-        {
-            // 过期的跟踪数据移除，更新为新的
-            for (uint32_t i = 0; i < list_capacity_ - 1; i++)
-            {
-                list_[i].age = list_[i + 1].age;
-                list_[i].tBbox.left = list_[i + 1].tBbox.left;
-                list_[i].tBbox.top = list_[i + 1].tBbox.top;
-                list_[i].tBbox.width = list_[i + 1].tBbox.width;
-                list_[i].tBbox.height = list_[i + 1].tBbox.height;
-                list_[i].confidence = list_[i + 1].confidence;
-                list_[i].trackerState = ACTIVE;
-                list_[i].visibility = 1.0;
-                list_[i].frameNum = frameNum_;
-            }
-            list_[list_capacity_ - 1].age =
-                trackerConfig_.targetManagement.maxTrackAge;
-            list_[list_capacity_ - 1].tBbox.left = trackInfo_.bbox.box.x0;
-            list_[list_capacity_ - 1].tBbox.top = trackInfo_.bbox.box.y0;
-            list_[list_capacity_ - 1].tBbox.width =
-                trackInfo_.bbox.box.x1 - trackInfo_.bbox.box.x0;
-            list_[list_capacity_ - 1].tBbox.height =
-                trackInfo_.bbox.box.y1 - trackInfo_.bbox.box.y0;
-            list_[list_capacity_ - 1].confidence = trackInfo_.bbox.score;
-            list_[list_capacity_ - 1].trackerState = ACTIVE;
-            list_[list_capacity_ - 1].visibility = 1.0;
-            list_[list_capacity_ - 1].frameNum = frameNum_;
-            list_size_ = list_capacity_;
-        }
+        NvDsTargetMiscDataFrame sample{};
+        sample.age = age_;
+        sample.tBbox.left = trackInfo_.bbox.box.x0;
+        sample.tBbox.top = trackInfo_.bbox.box.y0;
+        sample.tBbox.width = trackInfo_.bbox.box.x1 - trackInfo_.bbox.box.x0;
+        sample.tBbox.height = trackInfo_.bbox.box.y1 - trackInfo_.bbox.box.y0;
+        sample.confidence = trackInfo_.bbox.score;
+        sample.trackerState = ACTIVE;
+        sample.visibility = 1.0;
+        sample.frameNum = frameNum_;
+        if (history_.size() == list_capacity_)
+            history_.pop_front();
+        history_.push_back(sample);
 
         // 计算历史跟踪目标的位置，如果跟踪目标的中心位置变化不大，且不再画面中心，认为是虚假跟踪
         if (enableTrackCenterStable_)
         {
-            if (list_size_ == list_capacity_)
+            if (history_.size() == list_capacity_)
             {
                 // 计算跟踪中心位置的平均值
                 float avg_cx = 0.0f;
                 float avg_cy = 0.0f;
-                for (uint32_t i = 0; i < list_size_; i++)
+                for (const auto &entry : history_)
                 {
-                    avg_cx +=
-                        (list_[i].tBbox.left + list_[i].tBbox.width * 0.5f);
-                    avg_cy +=
-                        (list_[i].tBbox.top + list_[i].tBbox.height * 0.5f);
+                    avg_cx += entry.tBbox.left + entry.tBbox.width * 0.5f;
+                    avg_cy += entry.tBbox.top + entry.tBbox.height * 0.5f;
                 }
-                avg_cx /= list_size_;
-                avg_cy /= list_size_;
+                avg_cx /= history_.size();
+                avg_cy /= history_.size();
 
                 // 判断平均中心位置是否位于画面中心
                 bool isCentered = false;
@@ -425,19 +419,17 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
                     // 计算中心位置标准差
                     float std_dev_cx = 0.0f;
                     float std_dev_cy = 0.0f;
-                    for (uint32_t i = 0; i < list_size_; i++)
+                    for (const auto &entry : history_)
                     {
-                        std_dev_cx += std::pow((list_[i].tBbox.left +
-                                                list_[i].tBbox.width * 0.5f) -
-                                                   avg_cx,
-                                               2);
-                        std_dev_cy += std::pow((list_[i].tBbox.top +
-                                                list_[i].tBbox.height * 0.5f) -
-                                                   avg_cy,
-                                               2);
+                        std_dev_cx += std::pow(entry.tBbox.left +
+                                                  entry.tBbox.width * 0.5f - avg_cx,
+                                              2);
+                        std_dev_cy += std::pow(entry.tBbox.top +
+                                                  entry.tBbox.height * 0.5f - avg_cy,
+                                              2);
                     }
-                    std_dev_cx = std::sqrt(std_dev_cx / list_size_);
-                    std_dev_cy = std::sqrt(std_dev_cy / list_size_);
+                    std_dev_cx = std::sqrt(std_dev_cx / history_.size());
+                    std_dev_cy = std::sqrt(std_dev_cy / history_.size());
 
                     if (std_dev_cx < trackCenterStablePixelThreshold_ &&
                         std_dev_cy < trackCenterStablePixelThreshold_)
@@ -445,12 +437,10 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
                         // 如果平均中心位置变化很小，并且稳定在非画面中心位置，认为i是虚假跟踪
                         is_tracked_ = false;
                         age_ = 0;
-                        if (trackId_++ > 0xFFFFFFFF)
-                        {
-                            trackId_ = 0;
-                        }
+                        trackId_ = (trackId_ >= 0xFFFFFFFFLL) ? 0 : trackId_ + 1;
                         miss_ = 0;
                         memset(&trackInfo_, 0, sizeof(trackInfo_));
+                        trackInfo_.reset = true;
                         return trackInfo_;
                     }
                 }
@@ -463,34 +453,4 @@ TrackInfo DeepTracker::update(const cv::Mat             &img,
     trackInfo_.miss = miss_;
 
     return trackInfo_;
-}
-
-void DeepTracker::updatePastFrameObjBatch(
-    NvDsTargetMiscDataBatch *pastFrameObjBatch)
-{
-    if (pastFrameObjBatch != nullptr)
-    {
-        // pastFrameObjBatch->list，一个流对应一个list
-        if (pastFrameObjBatch->list != nullptr)
-        {
-            // 目前只用一个流所以pastFrameObjBatch_->list[0]
-            // pastFrameObjBatch->list[0].list表示一个流对应的所有目标，默认分配了512个目标内存
-            if (pastFrameObjBatch->list[0].list != nullptr)
-            {
-                // pastFrameObjBatch->list[0].list[0].list表示一个跟踪目标的历史帧数据
-                pastFrameObjBatch->list[0].list[0].list = list_;
-                pastFrameObjBatch->list[0].list[0].numObj = list_size_;
-                pastFrameObjBatch->list[0].list[0].classId =
-                    objectToTrack_->classId;
-                pastFrameObjBatch->list[0].list[0].uniqueId = trackId_;
-                pastFrameObjBatch->list[0].list[0].numAllocated =
-                    trackerConfig_.targetManagement.maxTrackAge;
-            }
-
-            pastFrameObjBatch->list[0].numFilled = 1;
-            pastFrameObjBatch->list[0].streamID = 0;
-            pastFrameObjBatch->list[0].surfaceStreamID = 0;
-        }
-        pastFrameObjBatch->numFilled = 1;
-    }
 }

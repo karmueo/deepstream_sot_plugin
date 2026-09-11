@@ -41,12 +41,22 @@ if(NOT CUDART_LIB)
     message(FATAL_ERROR "Could not find cudart library. Check CUDA installation.")
 endif()
 
-target_link_libraries(${PROJECT_NAME} nvds_meta ${OpenCV_LIBS} yaml-cpp nvinfer ${CUDART_LIB})
+find_library(NVTOOLSEXT_LIB nvToolsExt
+    PATHS /usr/local/cuda/lib64
+          /usr/local/cuda/targets/x86_64-linux/lib
+          /usr/local/cuda/targets/aarch64-linux/lib
+)
+if(NOT NVTOOLSEXT_LIB)
+    message(FATAL_ERROR "Could not find nvToolsExt library. Check CUDA installation.")
+endif()
+
+target_link_libraries(${PROJECT_NAME} nvds_meta ${OpenCV_LIBS} yaml-cpp nvinfer
+                      ${CUDART_LIB} ${NVTOOLSEXT_LIB})
 
 option(SOT_BUILD_TESTS "Build tests" OFF)
 if(SOT_BUILD_TESTS)
     enable_testing()
-    find_package(Catch2 3 REQUIRED)
+    find_package(Catch2 REQUIRED)
     add_executable(test_track tests/test_track.cpp)
     target_link_libraries(test_track PRIVATE ${PROJECT_NAME} nvds_meta ${OpenCV_LIBS} Catch2::Catch2WithMain)
     set_target_properties(test_track PROPERTIES

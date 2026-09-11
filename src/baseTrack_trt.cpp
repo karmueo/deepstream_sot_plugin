@@ -25,12 +25,13 @@ BaseTrackTRT::BaseTrackTRT(const std::string &engine_name)
 {
     // deserialize engine
     this->deserialize_engine(engine_name);
-    CHECK(cudaStreamCreate(&this->stream));
+    SOT_CUDA_CHECK(cudaStreamCreate(&this->stream));
 }
 
 BaseTrackTRT::~BaseTrackTRT()
 {
-    cudaStreamDestroy(this->stream);
+    if (this->stream != nullptr)
+        cudaStreamDestroy(this->stream);
     delete this->context;
     delete this->engine;
     delete this->runtime;
@@ -43,26 +44,52 @@ void BaseTrackTRT::deserialize_engine(const std::string &engine_name)
     // char *trt_model_stream{nullptr};
     size_t size{0};
     std::ifstream file(engine_name, std::ios::binary);
-    if (file.good())
+    if (!file.good())
+        throw std::runtime_error("Unable to open TensorRT engine: " + engine_name);
     {
         file.seekg(0, file.end);
         size = file.tellg();
         file.seekg(0, file.beg);
         this->trt_model_stream = new char[size];
-        assert(this->trt_model_stream);
+        if (size == 0)
+            throw std::runtime_error("TensorRT engine is empty: " + engine_name);
         file.read(trt_model_stream, size);
         file.close();
     }
 
     this->runtime = createInferRuntime(this->gLogger);
-    assert(this->runtime != nullptr);
+    if (this->runtime == nullptr)
+        throw std::runtime_error("Failed to create TensorRT runtime");
 
     this->engine = this->runtime->deserializeCudaEngine(trt_model_stream,
                                                         size);
-    assert(this->engine != nullptr);
+    if (this->engine == nullptr)
+        throw std::runtime_error("Failed to deserialize TensorRT engine: " + engine_name);
 
     this->context = this->engine->createExecutionContext();
-    assert(context != nullptr);
+    if (context == nullptr)
+        throw std::runtime_error("Failed to create TensorRT execution context: " + engine_name);
+}
+
+int BaseTrackTRT::initRgba(const cv::Mat &rgba, DrOBB bbox)
+{
+    if (rgba.empty() || rgba.channels() != 4)
+        return -1;
+    cv::Mat bgr;
+    cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
+    return init(bgr, bbox);
+}
+
+const DrOBB &BaseTrackTRT::trackRgba(const cv::Mat &rgba)
+{
+    if (rgba.empty() || rgba.channels() != 4)
+    {
+        std::memset(&object_box, 0, sizeof(object_box));
+        return object_box;
+    }
+    cv::Mat bgr;
+    cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
+    return track(bgr);
 }
 
 int BaseTrackTRT::sample_target(const cv::Mat &im, cv::Mat &croped, DrBBox target_bb, float search_area_factor, int output_sz, float &resize_factor)
