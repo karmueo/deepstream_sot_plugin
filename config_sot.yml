@@ -2,7 +2,7 @@
 
 BaseConfig:
   modelName: 3    # { 0=sutrack, 1=ostrack, 2=mixformer_v2, 3=nanotrack }
-  enableTrackCenterStable: 1 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
+  enableTrackCenterStable: 0 # 是否启用跟踪中心稳定判断(0=关闭,非0=开启)
   trackCenterStablePixelThreshold: 3 # 稳定判断像素标准差阈值(越小越严格)
 
 TargetManagement:

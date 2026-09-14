@@ -6,7 +6,7 @@
 #define DNSTARPROD_TRACKER_H
 
 #include "nvdstracker.h"
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 // #include "mixformer_trt.h"
 #include <memory>
 #include "deepTracker.h"

@@ -7,9 +7,8 @@
 #include <map>
 #include <memory>
 #include <stdexcept>
-#include "opencv2/opencv.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <half.hpp>
 #include <dirent.h>
 #include "NvInfer.h"
