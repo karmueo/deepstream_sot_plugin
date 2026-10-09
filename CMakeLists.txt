@@ -16,36 +16,11 @@ set(DS_INCLUDES_DIR ${DS_ROOT_DIR}/sources/includes)
 find_package(GLib)
 find_package(yaml-cpp REQUIRED)
 
-set(SOT_OPENCV_INCLUDE_DIR "/usr/include/opencv4" CACHE PATH
-    "OpenCV headers used to build the SOT runtime")
-set(_SOT_OPENCV_VERSION_HEADER
-    "${SOT_OPENCV_INCLUDE_DIR}/opencv2/core/version.hpp")
-if(NOT EXISTS "${_SOT_OPENCV_VERSION_HEADER}")
-    message(FATAL_ERROR
-        "OpenCV version header not found: ${_SOT_OPENCV_VERSION_HEADER}")
-endif()
-file(STRINGS "${_SOT_OPENCV_VERSION_HEADER}" _SOT_OPENCV_VERSION_MINOR_LINE
-    REGEX "^#define[ \t]+CV_VERSION_MINOR[ \t]+[0-9]+")
-if(NOT _SOT_OPENCV_VERSION_MINOR_LINE MATCHES "[ \t]5$")
-    message(FATAL_ERROR
-        "SOT must be compiled with OpenCV 4.5 headers; found: ${_SOT_OPENCV_VERSION_MINOR_LINE}")
-endif()
-find_library(SOT_OPENCV_CORE_LIBRARY
-    NAMES libopencv_core.so.4.5d
-    PATHS /usr/lib/aarch64-linux-gnu
-    NO_DEFAULT_PATH
-    REQUIRED)
-find_library(SOT_OPENCV_IMGPROC_LIBRARY
-    NAMES libopencv_imgproc.so.4.5d
-    PATHS /usr/lib/aarch64-linux-gnu
-    NO_DEFAULT_PATH
-    REQUIRED)
-set(SOT_OPENCV_LIBRARIES
-    "${SOT_OPENCV_IMGPROC_LIBRARY}"
-    "${SOT_OPENCV_CORE_LIBRARY}")
+# SOT 统一使用 /usr/local 下源码编译的 OpenCV 4.10。
+# EXACT rejects the incomplete JetPack OpenCV 4.8 package under /usr.
+find_package(OpenCV 4.10 EXACT REQUIRED COMPONENTS core imgproc)
 
 include_directories(${GLIB2_INCLUDE_DIR})
-include_directories(${SOT_OPENCV_INCLUDE_DIR})
 include_directories(${DS_INCLUDES_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/includes)
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
@@ -80,15 +55,28 @@ if(NOT NVTOOLSEXT_LIB)
     message(FATAL_ERROR "Could not find nvToolsExt library. Check CUDA installation.")
 endif()
 
-target_link_libraries(${PROJECT_NAME} nvds_meta ${SOT_OPENCV_LIBRARIES} yaml-cpp nvinfer
+target_link_libraries(${PROJECT_NAME} nvds_meta opencv_core opencv_imgproc yaml-cpp nvinfer
                       ${CUDART_LIB} ${NVTOOLSEXT_LIB})
+# 部署时 OpenCV 运行库与 libsot.so 同放在 lib/ 下。RUNPATH 不会从主程序
+# 传递到 libsot 的依赖，因此 libsot 自身只保留 $ORIGIN；开发时依赖
+# ldconfig 中的 /usr/local/lib。
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    BUILD_WITH_INSTALL_RPATH ON
+    INSTALL_RPATH "$ORIGIN"
+)
 
 option(SOT_BUILD_TESTS "Build tests" OFF)
 if(SOT_BUILD_TESTS)
     enable_testing()
     find_package(Catch2 REQUIRED)
+    # 测试程序需要读图、读写视频和窗口函数，libsot 本身只依赖 core/imgproc。
+    find_package(OpenCV 4.10 EXACT REQUIRED
+        COMPONENTS core imgproc imgcodecs videoio highgui)
+    set(SOT_TEST_OPENCV_LIBRARIES
+        opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio
+        opencv_highgui)
     add_executable(test_track tests/test_track.cpp)
-    target_link_libraries(test_track PRIVATE ${PROJECT_NAME} nvds_meta ${SOT_OPENCV_LIBRARIES} Catch2::Catch2WithMain)
+    target_link_libraries(test_track PRIVATE ${PROJECT_NAME} nvds_meta ${SOT_TEST_OPENCV_LIBRARIES} Catch2::Catch2WithMain)
     set_target_properties(test_track PROPERTIES
         BUILD_RPATH "${CMAKE_SOURCE_DIR}/lib"
     )
@@ -102,7 +90,7 @@ if(SOT_BUILD_TESTS)
     catch_discover_tests(test_track)
 
     add_executable(test_track_video tests/test_track_video.cpp)
-    target_link_libraries(test_track_video PRIVATE ${PROJECT_NAME} nvds_meta ${SOT_OPENCV_LIBRARIES})
+    target_link_libraries(test_track_video PRIVATE ${PROJECT_NAME} nvds_meta ${SOT_TEST_OPENCV_LIBRARIES})
     set_target_properties(test_track_video PROPERTIES
         BUILD_RPATH "${CMAKE_SOURCE_DIR}/lib"
     )

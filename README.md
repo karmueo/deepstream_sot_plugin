@@ -75,14 +75,15 @@ lib/
 * CUDA（CMake 中示例指向 `/usr/local/cuda`，请与本机实际路径一致）
 * TensorRT（随 DeepStream 安装提供）
 * NVIDIA DeepStream SDK（`DS_ROOT_DIR` 默认 `/opt/nvidia/deepstream/deepstream`）
-* OpenCV (用于图像预处理、可视化裁剪等)
+* OpenCV 4.10（需安装在 `/usr/local`，CMake 以 `EXACT` 版本查找；用于图像预处理、可视化裁剪等）
 * GLib (DeepStream 依赖)
 * yaml-cpp (解析 `config_sot.yml`，若未安装请自行安装)
 
 可能需要的系统包 (按发行版调整)：
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake libopencv-dev libglib2.0-dev libyaml-cpp-dev
+# OpenCV 4.10 需源码编译安装到 /usr/local，不要安装 apt 的 libopencv-dev
+sudo apt install -y build-essential cmake libglib2.0-dev libyaml-cpp-dev
 ```
 
 确保 DeepStream 安装后其 `lib` 与 `includes` 可被找到（或修改 CMakeLists 中的 `DS_ROOT_DIR`）。
